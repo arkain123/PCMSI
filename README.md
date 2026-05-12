@@ -57,6 +57,8 @@ Use them to quickly understand what a specific change does.
    `chmod +x deploy.sh`
 5) Run the deploy script:  
    `./deploy.sh`
+6) You can run with automated deploy with systemd unit using:
+   `./deploy.sh --with-systemd`
 
 ## How to run
 
@@ -130,6 +132,8 @@ ____
    `chmod +x deploy.sh`
 5) Запустите скрипт развёртывания:  
    `./deploy.sh`
+6) Также можно использовать автоматическое развертывание с systemd кофингом используя:
+   `./deploy.sh --with-systemd`
 
 ## Как запустить
 
