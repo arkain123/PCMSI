@@ -1,0 +1,587 @@
+{% extends 'monitoring/base.html' %}
+{% load static %}
+
+{% block title %}Мониторинг — метрики агентов{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="fas fa-tachometer-alt me-2"></i> Мониторинг</h1>
+    <div>
+        <select id="timeRangeSelect" class="form-select d-inline-block w-auto me-2">
+            <option value="1">Последний час</option>
+            <option value="2" selected>Последние 2 часа</option>
+            <option value="6">Последние 6 часов</option>
+            <option value="12">Последние 12 часов</option>
+            <option value="24">Последние сутки</option>
+            <option value="48">Последние 2 дня</option>
+            <option value="168">Последняя неделя</option>
+            <option value="720">Последний месяц</option>
+            <option value="2160">Последние 3 месяца</option>
+            <option value="4320">Последние 6 месяцев</option>
+            <option value="8760">Последний год</option>
+        </select>
+        <select id="autoRefreshSelect" class="form-select d-inline-block w-auto me-2">
+            <option value="0">Автообновление: выкл.</option>
+            <option value="10">Каждые 10 сек</option>
+            <option value="30" selected>Каждые 30 сек</option>
+            <option value="60">Каждую минуту</option>
+            <option value="300">Каждые 5 минут</option>
+        </select>
+        <button class="btn btn-primary-custom" id="refreshAll">
+            <i class="fas fa-sync-alt"></i> Обновить все
+        </button>
+        <button class="btn btn-secondary ms-2" id="forceSaveBtn">
+            <i class="fas fa-save"></i> Сохранить сейчас
+        </button>
+    </div>
+</div>
+
+<div class="grid-stack" id="dashboardGrid" style="min-height: 600px;"></div>
+
+<div class="mt-3">
+    <button class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#addPanelModal">
+        <i class="fas fa-plus"></i> Добавить панель
+    </button>
+</div>
+
+<div class="modal fade" id="addPanelModal" tabindex="-1">
+    <div class="modal-dialog modal-dark">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header">
+                <h5 class="modal-title">Добавить панель</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <label>Тип панели</label>
+                <select id="newPanelType" class="form-select mb-3">
+                    <option value="line">График</option>
+                    <option value="gauge">Gauge (спидометр)</option>
+                    <option value="stat">Счётчик (число)</option>
+                </select>
+                <label>Агент</label>
+                <select id="newAgentSelect" class="form-select">
+                    {% for agent in agents %}
+                    <option value="{{ agent.id }}">{{ agent.name }}</option>
+                    {% endfor %}
+                </select>
+                <label class="mt-2">Метрика</label>
+                <select id="newMetricSelect" class="form-select"></select>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary-custom" id="confirmAddPanel">Добавить</button>
+            </div>
+        </div>
+    </div>
+</div>
+<div class="modal fade" id="settingsModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header">
+                <h5 class="modal-title">Настройки панели</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="settingsContent"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" id="saveSettingsBtn">Сохранить</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const availableMetrics = JSON.parse('{{ available_metrics_json|safe }}');
+let grid = null;
+let currentSettingsPanel = null;
+let autoSaveTimer = null;
+
+function getCsrfToken() {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, 10) === 'csrftoken=') {
+                cookieValue = decodeURIComponent(cookie.substring(10));
+                break;
+            }
+        }
+    }
+    return cookieValue;
+}
+
+function escapeHtml(str) {
+    if (!str) return '';
+    return str.replace(/[&<>]/g, function(m) {
+        if (m === '&') return '&amp;';
+        if (m === '<') return '&lt;';
+        if (m === '>') return '&gt;';
+        return m;
+    });
+}
+
+async function saveToServer() {
+    if (!grid) return;
+    const items = [];
+    grid.getGridItems().forEach(el => {
+        const id = el.getAttribute('data-panel-id');
+        if (id && el.gridstackNode) {
+            const node = el.gridstackNode;
+            items.push({
+                id: id,
+                x: node.x,
+                y: node.y,
+                width: node.w,
+                height: node.h,
+                type: el.dataset.type,
+                agent: el.dataset.agent,
+                metric: el.dataset.metric,
+                title: el.dataset.title || '',
+                settings: JSON.parse(el.dataset.settings || '{}')
+            });
+        }
+    });
+    try {
+        const response = await fetch('/monitoring/api/dashboard/save/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
+            body: JSON.stringify({ panels: items })
+        });
+        if (!response.ok) console.error('Save failed');
+        else console.log('Saved', items.length, 'panels');
+    } catch(e) { console.error('Save error', e); }
+}
+
+function triggerAutoSave() {
+    if (autoSaveTimer) clearTimeout(autoSaveTimer);
+    autoSaveTimer = setTimeout(() => saveToServer(), 1000);
+}
+
+async function loadFromServer() {
+    try {
+        const response = await fetch('/monitoring/api/dashboard/load/');
+        if (!response.ok) throw new Error('Load failed');
+        const data = await response.json();
+        const panels = data.panels || [];
+        if (grid) grid.removeAll();
+
+        for (let item of panels) {
+            const el = createWidgetElement(item);
+            const opts = { minW: 1, minH: 2 };
+
+            if (item.x !== undefined && item.y !== undefined && item.x !== null && item.y !== null) {
+                opts.x = item.x;
+                opts.y = item.y;
+            } else {
+                opts.autoPosition = true;
+            }
+
+            if (item.width !== undefined && item.height !== undefined && item.width !== null && item.height !== null) {
+                opts.w = item.width;
+                opts.h = item.height;
+            } else {
+                const type = item.type || 'line';
+                if (type === 'gauge') { opts.w = 1; opts.h = 4; }
+                else if (type === 'stat') { opts.w = 1; opts.h = 2; }
+                else { opts.w = 3; opts.h = 3; }
+            }
+
+            grid.addWidget(el, opts);
+        }
+
+        refreshAll();
+        console.log('Loaded', panels.length, 'panels');
+    } catch(e) { console.error('Load error', e); }
+}
+
+function initGrid() {
+    const gridElement = document.getElementById('dashboardGrid');
+    if (grid) grid.destroy(true);
+    grid = GridStack.init({
+        cellHeight: 80,
+        verticalMargin: 20,
+        minWidth: 1,
+        minHeight: 2,
+        resizable: { handles: 'e, se, s, sw, w' },
+        draggable: { handle: '.card-header' },
+        disableOneColumnMode: true
+    }, gridElement);
+    grid.on('change', () => triggerAutoSave());
+}
+
+function createWidgetElement(options) {
+    const id = options.id || 'panel_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+    const type = options.type || 'line';
+    const agentId = options.agent;
+    const metricName = options.metric;
+    const settings = options.settings || {};
+    const defaultSettings = {
+        line: { minY: null, maxY: null, alertValue: null },
+        gauge: { minValue: 0, maxValue: 100, alertValue: null, decimals: 1 },
+        stat: { alertValue: null, decimals: 0 }
+    };
+    const finalSettings = { ...defaultSettings[type], ...settings };
+    let title = options.title || `${getAgentName(agentId)} — ${metricName}`;
+
+    const div = document.createElement('div');
+    div.className = 'grid-stack-item';
+    div.setAttribute('data-panel-id', id);
+    div.setAttribute('data-type', type);
+    div.setAttribute('data-agent', agentId);
+    div.setAttribute('data-metric', metricName);
+    div.setAttribute('data-title', title);
+    div.setAttribute('data-settings', JSON.stringify(finalSettings));
+
+    div.innerHTML = `
+        <div class="grid-stack-item-content">
+            <div class="card-dashboard h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span class="card-title"><i class="fas fa-chart-line me-2"></i> ${escapeHtml(title)}</span>
+                    <div class="card-actions">
+                        <i class="fas fa-cog edit-panel" title="Настройки" style="cursor:pointer;"></i>
+                        <i class="fas fa-trash-alt delete-panel" title="Удалить" style="cursor:pointer;"></i>
+                    </div>
+                </div>
+                <div class="card-body p-2" style="height: calc(100% - 45px);">
+                    <div class="panel-content" style="width:100%; height:100%;"></div>
+                </div>
+            </div>
+        </div>
+    `;
+    attachPanelEvents(div);
+    return div;
+}
+
+function addPanelToGrid(options) {
+    const el = createWidgetElement(options);
+    let width = options.width;
+    let height = options.height;
+    if (width === undefined || height === undefined) {
+        const type = options.type || 'line';
+        if (type === 'gauge') { width = 1; height = 4; }
+        else if (type === 'stat') { width = 1; height = 2; }
+        else { width = 3; height = 3; }
+    }
+    grid.addWidget(el, {
+        x: options.x || 0,
+        y: options.y || 0,
+        w: width,
+        h: height,
+        minW: 1,
+        minH: 2
+    });
+    return el.getAttribute('data-panel-id');
+}
+
+function attachPanelEvents(panelEl) {
+    const editBtn = panelEl.querySelector('.edit-panel');
+    const delBtn = panelEl.querySelector('.delete-panel');
+    if (editBtn) editBtn.addEventListener('click', (e) => { e.stopPropagation(); openSettings(panelEl); });
+    if (delBtn) delBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (confirm('Удалить панель?')) {
+            grid.removeWidget(panelEl);
+            saveToServer();
+        }
+    });
+}
+
+function getAgentName(agentId) {
+    const opt = document.querySelector(`#newAgentSelect option[value="${agentId}"]`);
+    return opt ? opt.textContent : agentId;
+}
+
+function openSettings(panelEl) {
+    currentSettingsPanel = panelEl;
+    const type = panelEl.dataset.type;
+    const settings = JSON.parse(panelEl.dataset.settings || '{}');
+    const currentTitle = panelEl.dataset.title || '';
+    const container = document.getElementById('settingsContent');
+    container.innerHTML = '';
+    container.innerHTML += `<div class="mb-3"><label>Заголовок панели</label><input type="text" id="setTitle" class="form-control" value="${escapeHtml(currentTitle)}"></div>`;
+    if (type === 'line') {
+        container.innerHTML += `
+            <div class="mb-3"><label>Min Y (пусто = авто)</label><input type="number" id="setMinY" class="form-control" value="${settings.minY !== null ? settings.minY : ''}"></div>
+            <div class="mb-3"><label>Max Y (пусто = авто)</label><input type="number" id="setMaxY" class="form-control" value="${settings.maxY !== null ? settings.maxY : ''}"></div>
+            <div class="mb-3"><label>Alert значение</label><input type="number" id="setAlert" class="form-control" value="${settings.alertValue !== null ? settings.alertValue : ''}"></div>
+        `;
+    } else if (type === 'gauge') {
+        container.innerHTML += `
+            <div class="mb-3"><label>Минимальное значение (0%)</label><input type="number" id="setMinVal" class="form-control" value="${settings.minValue !== undefined ? settings.minValue : 0}"></div>
+            <div class="mb-3"><label>Максимальное значение (100%)</label><input type="number" id="setMaxVal" class="form-control" value="${settings.maxValue !== undefined ? settings.maxValue : 100}"></div>
+            <div class="mb-3"><label>Alert значение</label><input type="number" id="setAlert" class="form-control" value="${settings.alertValue !== null ? settings.alertValue : ''}"></div>
+            <div class="mb-3"><label>Знаков после запятой</label><input type="number" id="setDecimals" class="form-control" step="1" min="0" value="${settings.decimals !== undefined ? settings.decimals : 1}"></div>
+        `;
+    } else if (type === 'stat') {
+        container.innerHTML += `
+            <div class="mb-3"><label>Alert значение</label><input type="number" id="setAlert" class="form-control" value="${settings.alertValue !== null ? settings.alertValue : ''}"></div>
+            <div class="mb-3"><label>Знаков после запятой</label><input type="number" id="setDecimals" class="form-control" step="1" min="0" value="${settings.decimals !== undefined ? settings.decimals : 0}"></div>
+        `;
+    }
+    new bootstrap.Modal(document.getElementById('settingsModal')).show();
+}
+
+document.getElementById('saveSettingsBtn').addEventListener('click', () => {
+    if (!currentSettingsPanel) return;
+    const type = currentSettingsPanel.dataset.type;
+    const settings = JSON.parse(currentSettingsPanel.dataset.settings || '{}');
+    const newTitle = document.getElementById('setTitle').value.trim();
+    if (newTitle) {
+        currentSettingsPanel.dataset.title = newTitle;
+        const titleSpan = currentSettingsPanel.querySelector('.card-title');
+        if (titleSpan) titleSpan.innerHTML = `<i class="fas fa-chart-line me-2"></i> ${escapeHtml(newTitle)}`;
+    }
+    if (type === 'line') {
+        const minY = document.getElementById('setMinY').value;
+        const maxY = document.getElementById('setMaxY').value;
+        const alertVal = document.getElementById('setAlert').value;
+        settings.minY = minY !== '' ? parseFloat(minY) : null;
+        settings.maxY = maxY !== '' ? parseFloat(maxY) : null;
+        settings.alertValue = alertVal !== '' ? parseFloat(alertVal) : null;
+    } else if (type === 'gauge') {
+        settings.minValue = parseFloat(document.getElementById('setMinVal').value);
+        settings.maxValue = parseFloat(document.getElementById('setMaxVal').value);
+        const alertVal = document.getElementById('setAlert').value;
+        settings.alertValue = alertVal !== '' ? parseFloat(alertVal) : null;
+        const decimals = parseInt(document.getElementById('setDecimals').value, 10);
+        settings.decimals = isNaN(decimals) ? 1 : decimals;
+    } else if (type === 'stat') {
+        const alertVal = document.getElementById('setAlert').value;
+        settings.alertValue = alertVal !== '' ? parseFloat(alertVal) : null;
+        const decimals = parseInt(document.getElementById('setDecimals').value, 10);
+        settings.decimals = isNaN(decimals) ? 0 : decimals;
+    }
+    currentSettingsPanel.dataset.settings = JSON.stringify(settings);
+    saveToServer();
+    updatePanelContent(currentSettingsPanel);
+    bootstrap.Modal.getInstance(document.getElementById('settingsModal')).hide();
+});
+
+function formatNumber(value, decimals) {
+    if (value === undefined || value === null) return '?';
+    return value.toFixed(decimals);
+}
+
+function adjustStatFontSize(container, valueElement) {
+    if (!container || !valueElement) return;
+    const height = container.clientHeight;
+    const width = container.clientWidth;
+    let fontSize = Math.min(height * 0.6, width * 0.3);
+    fontSize = Math.max(16, Math.min(120, fontSize));
+    valueElement.style.fontSize = fontSize + 'px';
+    valueElement.style.whiteSpace = 'nowrap';
+    valueElement.style.overflow = 'hidden';
+    valueElement.style.textOverflow = 'ellipsis';
+}
+
+function drawGauge(canvas, value, minVal, maxVal, decimals, alertValue) {
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const parent = canvas.parentElement;
+    const size = Math.min(parent.clientWidth, parent.clientHeight);
+    canvas.width = size * dpr;
+    canvas.height = size * dpr;
+    canvas.style.width = size + 'px';
+    canvas.style.height = size + 'px';
+    ctx.scale(dpr, dpr);
+
+    const centerX = size / 2;
+    const centerY = size * 0.68;
+    const radius = size * 0.35;
+    const startAngle = Math.PI;
+    const endAngle = 2 * Math.PI;
+
+    let percent = (value - minVal) / (maxVal - minVal);
+    percent = Math.min(1, Math.max(0, percent));
+    const valueAngle = startAngle + percent * Math.PI;
+
+    ctx.clearRect(0, 0, size, size);
+
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius, startAngle, endAngle);
+    ctx.lineWidth = size * 0.12;
+    ctx.strokeStyle = '#2c2c2c';
+    ctx.stroke();
+
+    const hue = (1 - percent) * 120;
+    const gradient = ctx.createLinearGradient(0, centerY - radius, 0, centerY + radius);
+    gradient.addColorStop(0, `hsl(${hue}, 100%, 50%)`);
+    gradient.addColorStop(1, `hsl(${hue}, 100%, 30%)`);
+
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius, startAngle, valueAngle);
+    ctx.lineWidth = size * 0.12;
+    ctx.strokeStyle = gradient;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+
+    if (alertValue !== null && value > alertValue) {
+        ctx.shadowColor = '#ff4d4d';
+        ctx.shadowBlur = size * 0.1;
+        ctx.stroke();
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+    }
+
+    const formattedValue = formatNumber(value, decimals);
+    ctx.font = `bold ${size * 0.18}px "Segoe UI", Roboto, sans-serif`;
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(formattedValue, centerX, centerY + radius * 0.15);
+
+    const percentText = `${formatNumber(percent * 100, 1)}%`;
+    ctx.font = `${size * 0.1}px "Segoe UI", Roboto, sans-serif`;
+    ctx.fillStyle = '#aaaaaa';
+    ctx.fillText(percentText, centerX, centerY + radius * 0.35);
+}
+
+function setupGaugeResize(panelEl, canvas, value, minVal, maxVal, decimals, alertValue) {
+    if (panelEl._gaugeResizeObserver) {
+        panelEl._gaugeResizeObserver.disconnect();
+        delete panelEl._gaugeResizeObserver;
+    }
+
+    panelEl._gaugeData = { value, minVal, maxVal, decimals, alertValue };
+
+    const observer = new ResizeObserver(() => {
+        const data = panelEl._gaugeData;
+        if (data && canvas.parentElement) {
+            drawGauge(canvas, data.value, data.minVal, data.maxVal, data.decimals, data.alertValue);
+        }
+    });
+    observer.observe(panelEl.querySelector('.panel-content'));
+    panelEl._gaugeResizeObserver = observer;
+}
+
+async function updatePanelContent(panelEl) {
+    const type = panelEl.dataset.type;
+    const agentId = panelEl.dataset.agent;
+    const metric = panelEl.dataset.metric;
+    const settings = JSON.parse(panelEl.dataset.settings || '{}');
+    const contentDiv = panelEl.querySelector('.panel-content');
+    if (!contentDiv) return;
+
+    if (type === 'line') {
+        const hours = document.getElementById('timeRangeSelect')?.value || 2;
+        try {
+            const resp = await fetch(`/monitoring/api/chart/${agentId}/${metric}/?hours=${hours}`);
+            const data = await resp.json();
+            const labels = data.labels.map(ts => new Date(ts).toLocaleTimeString('ru-RU', { hour:'2-digit', minute:'2-digit', second:'2-digit' }));
+            const lastValue = data.values.length > 0 ? data.values[data.values.length-1] : null;
+            const isAlert = settings.alertValue !== null && lastValue !== null && lastValue > settings.alertValue;
+            const canvas = document.createElement('canvas');
+            canvas.style.width = '100%';
+            canvas.style.height = '100%';
+            contentDiv.innerHTML = '';
+            contentDiv.appendChild(canvas);
+            const ctx = canvas.getContext('2d');
+            const chartOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { ticks: { autoSkip: true, maxTicksLimit: 10 } }
+                }
+            };
+            if (settings.minY !== null) chartOptions.scales.y = { min: settings.minY };
+            if (settings.maxY !== null) chartOptions.scales.y = { ...chartOptions.scales.y, max: settings.maxY };
+            new Chart(ctx, {
+                type: 'line',
+                data: { labels: labels, datasets: [{ label: metric, data: data.values, borderColor: isAlert ? '#ff4d4d' : '#ff9f4a', fill: true }] },
+                options: chartOptions
+            });
+        } catch(e) { contentDiv.innerHTML = '<div class="alert alert-danger">Ошибка графика</div>'; console.error(e); }
+    }
+    else if (type === 'gauge') {
+        try {
+            const resp = await fetch(`/monitoring/api/last/${agentId}/${metric}/`);
+            const { value } = await resp.json();
+            if (value === null || value === undefined) {
+                contentDiv.innerHTML = '<div class="alert alert-warning">Нет данных</div>';
+                return;
+            }
+            const minVal = settings.minValue || 0;
+            const maxVal = settings.maxValue || 100;
+            const decimals = settings.decimals !== undefined ? settings.decimals : 1;
+            const alertValue = settings.alertValue;
+
+            contentDiv.innerHTML = '';
+            const wrapper = document.createElement('div');
+            wrapper.style.display = 'flex';
+            wrapper.style.justifyContent = 'center';
+            wrapper.style.alignItems = 'center';
+            wrapper.style.width = '100%';
+            wrapper.style.height = '100%';
+            const canvas = document.createElement('canvas');
+            wrapper.appendChild(canvas);
+            contentDiv.appendChild(wrapper);
+
+            drawGauge(canvas, value, minVal, maxVal, decimals, alertValue);
+            setupGaugeResize(panelEl, canvas, value, minVal, maxVal, decimals, alertValue);
+        } catch(e) { contentDiv.innerHTML = '<div class="alert alert-danger">Ошибка gauge</div>'; console.error(e); }
+    }
+    else if (type === 'stat') {
+        try {
+            const resp = await fetch(`/monitoring/api/last/${agentId}/${metric}/`);
+            const { value } = await resp.json();
+            const isAlert = settings.alertValue !== null && value > settings.alertValue;
+            const decimals = settings.decimals !== undefined ? settings.decimals : 0;
+            const formattedValue = formatNumber(value, decimals);
+            contentDiv.innerHTML = `<div class="stat-value" style="display: flex; align-items: center; justify-content: center; width:100%; height:100%; color: ${isAlert ? 'red' : 'white'};">${formattedValue}</div>`;
+            const valueElement = contentDiv.querySelector('.stat-value');
+            const resizeObserver = new ResizeObserver(() => adjustStatFontSize(contentDiv, valueElement));
+            resizeObserver.observe(contentDiv);
+            adjustStatFontSize(contentDiv, valueElement);
+        } catch(e) { contentDiv.innerHTML = '<div class="alert alert-danger">Ошибка stat</div>'; console.error(e); }
+    }
+}
+
+function refreshAll() {
+    document.querySelectorAll('.grid-stack-item').forEach(panel => updatePanelContent(panel));
+}
+
+let refreshIntervalId = null;
+function setAutoRefresh(seconds) {
+    if (refreshIntervalId) clearInterval(refreshIntervalId);
+    if (seconds > 0) refreshIntervalId = setInterval(refreshAll, seconds * 1000);
+}
+document.getElementById('autoRefreshSelect')?.addEventListener('change', function() {
+    setAutoRefresh(parseInt(this.value, 10));
+});
+
+function addNewPanel() {
+    const type = document.getElementById('newPanelType').value;
+    const agentId = document.getElementById('newAgentSelect').value;
+    const metric = document.getElementById('newMetricSelect').value;
+    if (!agentId || !metric) return;
+    const exists = [...document.querySelectorAll('.grid-stack-item')].some(el => el.dataset.agent === agentId && el.dataset.metric === metric && el.dataset.type === type);
+    if (exists) { alert('Такая панель уже есть'); return; }
+    addPanelToGrid({ type, agent: agentId, metric, settings: {}, x: 0, y: 0 });
+    saveToServer();
+}
+document.getElementById('confirmAddPanel')?.addEventListener('click', addNewPanel);
+document.getElementById('forceSaveBtn')?.addEventListener('click', saveToServer);
+
+document.getElementById('newAgentSelect')?.addEventListener('change', function() {
+    const agentId = this.value;
+    const metricSelect = document.getElementById('newMetricSelect');
+    metricSelect.innerHTML = '';
+    const metrics = availableMetrics[agentId] || [];
+    if (!metrics.length) metricSelect.innerHTML = '<option disabled>Нет метрик</option>';
+    else metrics.forEach(m => { const opt = document.createElement('option'); opt.value = m; opt.textContent = m; metricSelect.appendChild(opt); });
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+    initGrid();
+    const agentSelect = document.getElementById('newAgentSelect');
+    if (agentSelect) agentSelect.dispatchEvent(new Event('change'));
+    loadFromServer();
+    setAutoRefresh(30);
+    document.getElementById('timeRangeSelect')?.addEventListener('change', refreshAll);
+    document.getElementById('refreshAll')?.addEventListener('click', refreshAll);
+});
+</script>
+{% endblock %}

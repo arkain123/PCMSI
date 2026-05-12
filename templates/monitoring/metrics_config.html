@@ -1,0 +1,478 @@
+{% extends 'monitoring/base.html' %}
+{% load static %}
+
+{% block title %}Настройка метрик агентов{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="fas fa-sliders-h me-2"></i> Настройка метрик</h1>
+</div>
+
+<div class="row">
+    <div class="col-md-6">
+        <div class="card-dashboard">
+            <div class="card-header">
+                <span class="card-title">
+                    <i class="fas fa-globe me-2"></i>Глобальная конфигурация
+                </span>
+                {% if global_config %}
+                <span class="badge bg-info">Версия: {{ global_config.version }}</span>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">JSON конфигурация (все агенты)</label>
+                    <textarea id="globalConfigJson" class="form-control json-editor" rows="15"
+                              placeholder='{
+  "metrics": {
+    "cpu": true
+  },
+  "agent_runtime": {
+    "interval_seconds": 10
+  }
+}'>{{ global_config_json }}</textarea>
+                </div>
+                <div class="alert alert-info">
+                    <i class="fas fa-info-circle"></i>
+                    <strong>Как это работает:</strong> При изменении глобальной конфигурации, все агенты получат новую версию при следующей отправке метрик.
+                </div>
+                <button class="btn btn-primary-custom" id="saveGlobalConfig">
+                    <i class="fas fa-save"></i> Сохранить глобальную конфигурацию
+                </button>
+                <div id="globalConfigStatus" class="mt-2"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card-dashboard">
+            <div class="card-header">
+                <span class="card-title">
+                    <i class="fas fa-robot me-2"></i>Персональные конфигурации агентов
+                </span>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">Выберите агента</label>
+                    <select id="agentSelect" class="form-select">
+                        <option value="">-- выберите агента --</option>
+                        {% for agent in agents %}
+                        <option value="{{ agent.id }}">{{ agent.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div id="agentConfigSection" style="display: none;">
+                    <div class="mb-3">
+                        <label class="form-label">JSON конфигурация агента</label>
+                        <textarea id="agentConfigJson" class="form-control json-editor" rows="12"
+                                  placeholder='{
+  "metrics": {
+    "cpu": true,
+    "ram": false
+  },
+  "agent_runtime": {
+    "interval_seconds": 5
+  }
+}'></textarea>
+                    </div>
+                    <div class="alert alert-warning">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <strong>Внимание:</strong> Эта конфигурация переопределяет глобальные настройки только для выбранного агента.
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-primary-custom" id="saveAgentConfig">
+                            <i class="fas fa-save"></i> Сохранить для агента
+                        </button>
+                        <button class="btn btn-outline-danger" id="deleteAgentConfig" style="display: none;">
+                            <i class="fas fa-trash"></i> Удалить персональную конфигурацию
+                        </button>
+                    </div>
+                    <div id="agentConfigStatus" class="mt-2"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card-dashboard">
+            <div class="card-header">
+                <span class="card-title">
+                    <i class="fas fa-book me-2"></i>Примеры конфигураций
+                </span>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-info mb-3">
+                    <i class="fas fa-info-circle"></i>
+                    <strong>Важно:</strong> Конфигурация применяется к агенту полностью. Агент заменяет свой текущий конфиг полученным от мастера.
+                    При изменении версии глобального конфига, агенты автоматически получат обновление при следующей отправке метрик.
+                </div>
+
+                <div class="row">
+                    <div class="col-md-4">
+                        <h6>Минимальная конфигурация</h6>
+                        <pre class="bg-dark p-3 rounded"><code>{
+  "metrics": {
+    "cpu": true,
+    "ram": true
+  },
+  "agent_runtime": {
+    "interval_seconds": 10
+  }
+}</code></pre>
+                        <small class="text-muted">Только CPU и RAM, интервал 10 секунд</small>
+                    </div>
+
+                    <div class="col-md-4">
+                        <h6>Полная конфигурация</h6>
+                        <pre class="bg-dark p-3 rounded"><code>{
+  "metrics": {
+    "cpu": true,
+    "ram": true,
+    "disk": true,
+    "network": true,
+    "system": true,
+    "load_avg": true
+  },
+  "agent_runtime": {
+    "interval_seconds": 10,
+    "retry_attempts": 3,
+    "retry_delay": 2
+  }
+}</code></pre>
+                        <small class="text-muted">Все метрики включены, стандартные настройки сети</small>
+                    </div>
+
+                    <div class="col-md-4">
+                        <h6>Частый опрос (нагрузка)</h6>
+                        <pre class="bg-dark p-3 rounded"><code>{
+  "metrics": {
+    "cpu": true,
+    "ram": true,
+    "network": true,
+    "disk": false,
+    "system": false,
+    "load_avg": false
+  },
+  "agent_runtime": {
+    "interval_seconds": 5,
+    "retry_attempts": 5,
+    "retry_delay": 1
+  }
+}</code></pre>
+                        <small class="text-muted">Быстрый опрос важных метрик каждые 5 секунд</small>
+                    </div>
+                </div>
+
+                <div class="mt-3">
+                    <h6>Структура конфигурации агента:</h6>
+                    <table class="table table-dark-custom table-sm">
+                        <thead>
+                            <tr>
+                                <th>Секция</th>
+                                <th>Параметр</th>
+                                <th>Тип</th>
+                                <th>Описание</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td rowspan="6"><strong>metrics</strong></td>
+                                <td><code>cpu</code></td>
+                                <td>boolean</td>
+                                <td>Сбор CPU (cpu_percent)</td>
+                            </tr>
+                            <tr>
+                                <td><code>ram</code></td>
+                                <td>boolean</td>
+                                <td>Сбор RAM (ram_percent, ram_used, ram_total)</td>
+                            </tr>
+                            <tr>
+                                <td><code>disk</code></td>
+                                <td>boolean</td>
+                                <td>Сбор диска (disk_percent, disk_used, disk_total)</td>
+                            </tr>
+                            <tr>
+                                <td><code>network</code></td>
+                                <td>boolean</td>
+                                <td>Сбор сети (net_bytes_sent, net_bytes_recv)</td>
+                            </tr>
+                            <tr>
+                                <td><code>system</code></td>
+                                <td>boolean</td>
+                                <td>Сбор системы (uptime_seconds)</td>
+                            </tr>
+                            <tr>
+                                <td><code>load_avg</code></td>
+                                <td>boolean</td>
+                                <td>Сбор Load Average (load_1min, load_5min, load_15min)</td>
+                            </tr>
+                            <tr>
+                                <td rowspan="3"><strong>agent_runtime</strong></td>
+                                <td><code>interval_seconds</code></td>
+                                <td>number</td>
+                                <td>Интервал отправки метрик (секунды)</td>
+                            </tr>
+                            <tr>
+                                <td><code>retry_attempts</code></td>
+                                <td>number</td>
+                                <td>Количество попыток при ошибке</td>
+                            </tr>
+                            <tr>
+                                <td><code>retry_delay</code></td>
+                                <td>number</td>
+                                <td>Задержка между попытками (секунды)</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const agentOverrides = {{ agent_overrides_json|safe }};
+
+function getCsrfToken() {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, 10) === 'csrftoken=') {
+                cookieValue = decodeURIComponent(cookie.substring(10));
+                break;
+            }
+        }
+    }
+    return cookieValue;
+}
+
+function showStatus(elementId, message, type) {
+    const element = document.getElementById(elementId);
+    element.innerHTML = `<div class="alert alert-${type} py-2">${message}</div>`;
+    setTimeout(() => { element.innerHTML = ''; }, 3000);
+}
+
+function validateJSON(jsonString) {
+    try {
+        return JSON.parse(jsonString);
+    } catch (e) {
+        throw new Error('Невалидный JSON. Проверьте формат: используйте двойные кавычки, true/false вместо True/False');
+    }
+}
+
+document.getElementById('saveGlobalConfig').addEventListener('click', async function() {
+    const configJson = document.getElementById('globalConfigJson').value;
+
+    try {
+        validateJSON(configJson);
+    } catch (e) {
+        showStatus('globalConfigStatus', e.message, 'danger');
+        return;
+    }
+
+    try {
+        const formData = new FormData();
+        formData.append('global_config_json', configJson);
+
+        const response = await fetch('/monitoring/metrics-config/', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCsrfToken()
+            },
+            body: formData
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            showStatus('globalConfigStatus', `Глобальная конфигурация сохранена (версия: ${data.version})`, 'success');
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            const data = await response.json();
+            showStatus('globalConfigStatus', 'Ошибка: ' + (data.error || 'Не удалось сохранить'), 'danger');
+        }
+    } catch (error) {
+        console.error('Error saving global config:', error);
+        showStatus('globalConfigStatus', 'Ошибка при сохранении', 'danger');
+    }
+});
+
+document.getElementById('agentSelect').addEventListener('change', function() {
+    const agentId = this.value;
+    const configSection = document.getElementById('agentConfigSection');
+    const configTextarea = document.getElementById('agentConfigJson');
+    const deleteBtn = document.getElementById('deleteAgentConfig');
+
+    if (!agentId) {
+        configSection.style.display = 'none';
+        return;
+    }
+
+    configSection.style.display = 'block';
+
+    if (agentOverrides[agentId]) {
+        configTextarea.value = JSON.stringify(agentOverrides[agentId], null, 2);
+        deleteBtn.style.display = 'inline-block';
+    } else {
+        configTextarea.value = '';
+        deleteBtn.style.display = 'none';
+    }
+});
+
+document.getElementById('saveAgentConfig').addEventListener('click', async function() {
+    const agentId = document.getElementById('agentSelect').value;
+    const configJson = document.getElementById('agentConfigJson').value;
+
+    if (!agentId || !configJson) {
+        showStatus('agentConfigStatus', 'Выберите агента и введите конфигурацию', 'danger');
+        return;
+    }
+
+    try {
+        validateJSON(configJson);
+    } catch (e) {
+        showStatus('agentConfigStatus', e.message, 'danger');
+        return;
+    }
+
+    try {
+        const formData = new FormData();
+        formData.append('agent_override_id', agentId);
+        formData.append('override_json', configJson);
+
+        const response = await fetch('/monitoring/metrics-config/', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCsrfToken()
+            },
+            body: formData
+        });
+
+        if (response.ok) {
+            showStatus('agentConfigStatus', 'Конфигурация агента сохранена', 'success');
+
+            agentOverrides[agentId] = JSON.parse(configJson);
+            document.getElementById('deleteAgentConfig').style.display = 'inline-block';
+
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            const data = await response.json();
+            showStatus('agentConfigStatus', 'Ошибка: ' + (data.error || 'Не удалось сохранить'), 'danger');
+        }
+    } catch (error) {
+        console.error('Error saving agent config:', error);
+        showStatus('agentConfigStatus', 'Ошибка при сохранении', 'danger');
+    }
+});
+
+document.getElementById('deleteAgentConfig').addEventListener('click', async function() {
+    const agentId = document.getElementById('agentSelect').value;
+
+    if (!confirm('Удалить персональную конфигурацию для этого агента?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/monitoring/api/delete-agent-override/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCsrfToken()
+            },
+            body: JSON.stringify({ agent_id: agentId })
+        });
+
+        if (response.ok) {
+            showStatus('agentConfigStatus', 'Конфигурация удалена', 'success');
+            document.getElementById('agentConfigJson').value = '';
+            document.getElementById('deleteAgentConfig').style.display = 'none';
+
+            delete agentOverrides[agentId];
+        } else {
+            showStatus('agentConfigStatus', 'Ошибка при удалении', 'danger');
+        }
+    } catch (error) {
+        console.error('Error deleting agent config:', error);
+        showStatus('agentConfigStatus', 'Ошибка при удалении', 'danger');
+    }
+});
+</script>
+
+<style>
+/* Улучшенные стили для JSON‑редакторов */
+.json-editor {
+    background-color: #09090b !important;      /* очень тёмный фон, как в примерах */
+    color: #ff9f4a !important;                 /* оранжевый текст, как в <pre> */
+    border: 1px solid #2c2c2e;
+    font-family: 'Courier New', monospace;
+    font-size: 0.9rem;
+    line-height: 1.5;
+    padding: 12px;
+    resize: vertical;
+    min-height: 200px;
+}
+
+.json-editor::placeholder {
+    color: #8b8b93 !important;
+    opacity: 1;
+}
+
+.json-editor:focus {
+    border-color: #ff9f4a;
+    box-shadow: 0 0 0 0.2rem rgba(255,159,74,0.25);
+}
+
+/* Остальные стили страницы */
+.card-dashboard {
+    height: fit-content;
+}
+
+.card-body {
+    height: auto;
+    overflow: visible;
+}
+
+#agentConfigSection {
+    overflow: visible;
+}
+
+pre {
+    margin: 0;
+    color: #e5e7eb;
+    font-size: 0.85rem;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+pre code {
+    color: #ff9f4a;
+}
+
+.alert {
+    margin-bottom: 1rem;
+}
+
+.row.mt-4 {
+    margin-top: 2rem !important;
+    clear: both;
+}
+
+.table-sm td, .table-sm th {
+    padding: 8px;
+    font-size: 0.85rem;
+}
+
+.table-sm td code {
+    color: #ff9f4a;
+    background: #2c2c2e;
+    padding: 2px 6px;
+    border-radius: 3px;
+}
+</style>
+{% endblock %}

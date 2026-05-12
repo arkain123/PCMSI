@@ -1,0 +1,509 @@
+{% extends 'monitoring/base.html' %}
+{% load static %}
+
+{% block title %}Уведомления — получатели{% endblock %}
+
+{% block extra_head %}
+<style>
+    /* Чёткие подсказки в полях ввода */
+    .form-control::placeholder {
+        color: #8b8b93 !important;
+        opacity: 1 !important;
+    }
+    .form-control:focus::placeholder {
+        color: #a1a1aa !important;
+    }
+    /* Подсказки под полями — чуть ярче, чем стандартный text-muted */
+    small.text-muted {
+        color: #a1a1aa !important;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="fas fa-bell me-2"></i> Получатели уведомлений</h1>
+    <button class="btn btn-primary-custom" data-bs-toggle="modal" data-bs-target="#addTargetModal">
+        <i class="fas fa-plus"></i> Добавить бота
+    </button>
+</div>
+
+<div class="row">
+    {% for target in targets %}
+    <div class="col-md-6 mb-4">
+        <div class="card-dashboard">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span class="card-title">
+                    {% if target.target_type == 'telegram' %}
+                        <i class="fab fa-telegram-plane me-2"></i>
+                    {% elif target.target_type == 'discord' %}
+                        <i class="fab fa-discord me-2"></i>
+                    {% endif %}
+                    {{ target.name }}
+                </span>
+                <div>
+                    {% if target.is_active %}
+                        <span class="badge bg-success">Активен</span>
+                    {% else %}
+                        <span class="badge bg-danger">Отключен</span>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="text-muted">Тип:</label>
+                    <span>{{ target.get_target_type_display }}</span>
+                </div>
+
+                <div class="mb-3">
+                    <label class="text-muted">Токен:</label>
+                    <code>{{ target.token|slice:":10" }}...</code>
+                </div>
+
+                <div class="mb-3">
+                    <label class="text-muted">Каналы ({{ target.channels|length }}):</label>
+                    <div class="d-flex flex-wrap gap-2">
+                        {% for channel in target.channels %}
+                            <span class="badge bg-secondary">{{ channel }}</span>
+                        {% empty %}
+                            <span class="text-muted">Нет каналов</span>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="text-muted">Создан:</label>
+                    <span>{{ target.created_at|date:"d.m.Y H:i" }}</span>
+                </div>
+
+                <div class="d-flex gap-2">
+                    <button class="btn btn-sm btn-outline-info edit-target-btn"
+                            data-target-id="{{ target.id }}"
+                            data-target-name="{{ target.name }}"
+                            data-target-type="{{ target.target_type }}"
+                            data-target-token="{{ target.token }}"
+                            data-target-channels="{{ target.channels|safe|escapejs }}">
+                        <i class="fas fa-edit"></i> Изменить
+                    </button>
+
+                    <button class="btn btn-sm btn-outline-warning test-target-btn"
+                            data-target-id="{{ target.id }}">
+                        <i class="fas fa-paper-plane"></i> Тест
+                    </button>
+
+                    {% if target.is_active %}
+                        <button class="btn btn-sm btn-outline-secondary toggle-target-btn"
+                                data-target-id="{{ target.id }}"
+                                data-action="deactivate">
+                            <i class="fas fa-pause"></i> Отключить
+                        </button>
+                    {% else %}
+                        <button class="btn btn-sm btn-outline-success toggle-target-btn"
+                                data-target-id="{{ target.id }}"
+                                data-action="activate">
+                            <i class="fas fa-play"></i> Включить
+                        </button>
+                    {% endif %}
+
+                    <button class="btn btn-sm btn-outline-danger delete-target-btn"
+                            data-target-id="{{ target.id }}"
+                            data-target-name="{{ target.name }}">
+                        <i class="fas fa-trash"></i> Удалить
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% empty %}
+    <div class="col-12">
+        <div class="card-dashboard">
+            <div class="card-body text-center py-5">
+                <i class="fas fa-bell-slash fa-3x mb-3 text-muted"></i>
+                <p class="text-muted">Нет настроенных получателей уведомлений</p>
+                <button class="btn btn-primary-custom" data-bs-toggle="modal" data-bs-target="#addTargetModal">
+                    <i class="fas fa-plus"></i> Добавить первого бота
+                </button>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="modal fade" id="addTargetModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-plus-circle me-2"></i>Добавить бота
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="addTargetForm">
+                    <div class="mb-3">
+                        <label class="form-label">Название *</label>
+                        <input type="text" class="form-control" id="addTargetName" required
+                               placeholder="Например: Production Alerts">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Тип бота *</label>
+                        <select class="form-select" id="addTargetType" required>
+                            <option value="">-- выберите тип --</option>
+                            <option value="telegram">Telegram Bot</option>
+                            <option value="discord">Discord Bot</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Токен бота *</label>
+                        <input type="text" class="form-control" id="addTargetToken" required
+                               placeholder="123456:ABC-DEF1234... или webhook URL">
+                        <small class="text-muted">
+                            Для Telegram: токен от @BotFather<br>
+                            Для Discord: webhook URL канала
+                        </small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">ID каналов/чатов</label>
+                        <div id="channelsList">
+                            <div class="input-group mb-2">
+                                <input type="text" class="form-control channel-input"
+                                       placeholder="Например: -1001234567890">
+                                <button class="btn btn-outline-danger remove-channel-btn" type="button">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <button class="btn btn-sm btn-outline-secondary" type="button" id="addChannelBtn">
+                            <i class="fas fa-plus"></i> Добавить канал
+                        </button>
+                        <small class="text-muted d-block mt-1">
+                            Telegram: ID чата (можно получить через @userinfobot)<br>
+                            Discord: ID канала (включить режим разработчика)
+                        </small>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-primary-custom" id="saveTargetBtn">
+                    <i class="fas fa-save"></i> Сохранить
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="editTargetModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-edit me-2"></i>Редактировать бота
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editTargetForm">
+                    <input type="hidden" id="editTargetId">
+                    <div class="mb-3">
+                        <label class="form-label">Название *</label>
+                        <input type="text" class="form-control" id="editTargetName" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Тип бота *</label>
+                        <select class="form-select" id="editTargetType" required>
+                            <option value="telegram">Telegram Bot</option>
+                            <option value="discord">Discord Bot</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Новый токен (оставьте пустым чтобы не менять)</label>
+                        <input type="text" class="form-control" id="editTargetToken"
+                               placeholder="Оставьте пустым для сохранения текущего">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">ID каналов/чатов</label>
+                        <div id="editChannelsList"></div>
+                        <button class="btn btn-sm btn-outline-secondary mt-2" type="button" id="addEditChannelBtn">
+                            <i class="fas fa-plus"></i> Добавить канал
+                        </button>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-primary-custom" id="updateTargetBtn">
+                    <i class="fas fa-save"></i> Обновить
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const targetsData = {{ targets_json|safe }};
+
+function getCsrfToken() {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, 10) === 'csrftoken=') {
+                cookieValue = decodeURIComponent(cookie.substring(10));
+                break;
+            }
+        }
+    }
+    return cookieValue;
+}
+
+function showAlert(message, type = 'success') {
+    const alert = document.createElement('div');
+    alert.className = `alert alert-${type} alert-dismissible fade show position-fixed top-0 start-50 translate-middle-x mt-3`;
+    alert.style.zIndex = '9999';
+    alert.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    document.body.appendChild(alert);
+    setTimeout(() => alert.remove(), 3000);
+}
+
+document.getElementById('addChannelBtn')?.addEventListener('click', function() {
+    const container = document.getElementById('channelsList');
+    const div = document.createElement('div');
+    div.className = 'input-group mb-2';
+    div.innerHTML = `
+        <input type="text" class="form-control channel-input" placeholder="ID канала или чата">
+        <button class="btn btn-outline-danger remove-channel-btn" type="button">
+            <i class="fas fa-times"></i>
+        </button>
+    `;
+    container.appendChild(div);
+
+    div.querySelector('.remove-channel-btn').addEventListener('click', function() {
+        if (container.children.length > 1) {
+            div.remove();
+        }
+    });
+});
+
+document.getElementById('saveTargetBtn')?.addEventListener('click', async function() {
+    const name = document.getElementById('addTargetName').value.trim();
+    const type = document.getElementById('addTargetType').value;
+    const token = document.getElementById('addTargetToken').value.trim();
+
+    if (!name || !type || !token) {
+        showAlert('Заполните все обязательные поля', 'danger');
+        return;
+    }
+
+    const channels = Array.from(document.querySelectorAll('#addTargetForm .channel-input'))
+        .map(input => input.value.trim())
+        .filter(v => v);
+
+    try {
+        const response = await fetch('/monitoring/api/notification-target/create/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCsrfToken()
+            },
+            body: JSON.stringify({ name, target_type: type, token, channels })
+        });
+
+        if (response.ok) {
+            location.reload();
+        } else {
+            const data = await response.json();
+            showAlert('Ошибка: ' + (data.error || 'Не удалось создать'), 'danger');
+        }
+    } catch (error) {
+        console.error('Error creating target:', error);
+        showAlert('Ошибка при создании', 'danger');
+    }
+});
+
+document.querySelectorAll('.edit-target-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        const targetId = this.dataset.targetId;
+
+        const targetData = targetsData.find(t => String(t.id) === String(targetId));
+
+        if (!targetData) {
+            alert('Бот не найден');
+            return;
+        }
+
+        document.getElementById('editTargetId').value = targetData.id;
+        document.getElementById('editTargetName').value = targetData.name;
+        document.getElementById('editTargetType').value = targetData.target_type;
+        document.getElementById('editTargetToken').value = '';
+        document.getElementById('editTargetToken').placeholder = 'Оставьте пустым для сохранения текущего токена';
+
+        const channels = targetData.channels && targetData.channels.length > 0
+            ? targetData.channels
+            : [''];
+
+        const container = document.getElementById('editChannelsList');
+        container.innerHTML = '';
+
+        channels.forEach(ch => {
+            const div = document.createElement('div');
+            div.className = 'input-group mb-2';
+            div.innerHTML = `
+                <input type="text" class="form-control edit-channel-input" value="${ch}">
+                <button class="btn btn-outline-danger remove-edit-channel-btn" type="button">
+                    <i class="fas fa-times"></i>
+                </button>
+            `;
+            container.appendChild(div);
+            div.querySelector('.remove-edit-channel-btn').addEventListener('click', () => {
+                if (container.children.length > 1) div.remove();
+            });
+        });
+
+        new bootstrap.Modal(document.getElementById('editTargetModal')).show();
+    });
+});
+
+document.getElementById('addEditChannelBtn')?.addEventListener('click', function() {
+    const container = document.getElementById('editChannelsList');
+    const div = document.createElement('div');
+    div.className = 'input-group mb-2';
+    div.innerHTML = `
+        <input type="text" class="form-control edit-channel-input" placeholder="ID канала или чата">
+        <button class="btn btn-outline-danger remove-edit-channel-btn" type="button">
+            <i class="fas fa-times"></i>
+        </button>
+    `;
+    container.appendChild(div);
+    div.querySelector('.remove-edit-channel-btn').addEventListener('click', () => div.remove());
+});
+
+document.getElementById('updateTargetBtn')?.addEventListener('click', async function() {
+    const id = document.getElementById('editTargetId').value;
+    const name = document.getElementById('editTargetName').value.trim();
+    const type = document.getElementById('editTargetType').value;
+    const token = document.getElementById('editTargetToken').value.trim();
+
+    if (!name || !type) {
+        showAlert('Заполните обязательные поля', 'danger');
+        return;
+    }
+
+    const channels = Array.from(document.querySelectorAll('#editChannelsList .edit-channel-input'))
+        .map(input => input.value.trim())
+        .filter(v => v);
+
+    const data = { name, target_type: type, channels };
+    if (token) data.token = token;
+
+    try {
+        const response = await fetch(`/monitoring/api/notification-target/${id}/update/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCsrfToken()
+            },
+            body: JSON.stringify(data)
+        });
+
+        if (response.ok) {
+            location.reload();
+        } else {
+            const respData = await response.json();
+            showAlert('Ошибка: ' + (respData.error || 'Не удалось обновить'), 'danger');
+        }
+    } catch (error) {
+        console.error('Error updating target:', error);
+        showAlert('Ошибка при обновлении', 'danger');
+    }
+});
+
+document.querySelectorAll('.toggle-target-btn').forEach(btn => {
+    btn.addEventListener('click', async function() {
+        const id = this.dataset.targetId;
+        const action = this.dataset.action;
+
+        try {
+            const response = await fetch(`/monitoring/api/notification-target/${id}/toggle/`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCsrfToken()
+                },
+                body: JSON.stringify({ is_active: action === 'activate' })
+            });
+
+            if (response.ok) {
+                location.reload();
+            } else {
+                const data = await response.json();
+                showAlert('Ошибка: ' + (data.error || 'Не удалось изменить статус'), 'danger');
+            }
+        } catch (error) {
+            console.error('Error toggling target:', error);
+            showAlert('Ошибка при изменении статуса', 'danger');
+        }
+    });
+});
+
+document.querySelectorAll('.test-target-btn').forEach(btn => {
+    btn.addEventListener('click', async function() {
+        const id = this.dataset.targetId;
+        this.disabled = true;
+        this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Отправка...';
+
+        try {
+            const response = await fetch(`/monitoring/api/notification-target/${id}/test/`);
+            const data = await response.json();
+
+            if (response.ok && data.success) {
+                showAlert('Тестовое сообщение отправлено!', 'success');
+            } else {
+                showAlert('Ошибка: ' + (data.error || data.message || 'Не удалось отправить'), 'warning');
+            }
+        } catch (error) {
+            console.error('Error testing target:', error);
+            showAlert('Ошибка при тестировании', 'danger');
+        } finally {
+            this.disabled = false;
+            this.innerHTML = '<i class="fas fa-paper-plane"></i> Тест';
+        }
+    });
+});
+
+document.querySelectorAll('.delete-target-btn').forEach(btn => {
+    btn.addEventListener('click', async function() {
+        const id = this.dataset.targetId;
+        const name = this.dataset.targetName;
+
+        if (!confirm(`Удалить получателя "${name}"?`)) return;
+
+        try {
+            const response = await fetch(`/monitoring/api/notification-target/${id}/delete/`, {
+                method: 'DELETE',
+                headers: { 'X-CSRFToken': getCsrfToken() }
+            });
+
+            if (response.ok) {
+                location.reload();
+            } else {
+                const data = await response.json();
+                showAlert('Ошибка: ' + (data.error || 'Не удалось удалить'), 'danger');
+            }
+        } catch (error) {
+            console.error('Error deleting target:', error);
+            showAlert('Ошибка при удалении', 'danger');
+        }
+    });
+});
+</script>
+{% endblock %}

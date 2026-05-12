@@ -1,0 +1,668 @@
+{% extends 'monitoring/base.html' %}
+{% load static %}
+
+{% block title %}Сеть — обнаружение хостов{% endblock %}
+
+{% block extra_head %}
+    <link href="https://unpkg.com/vis-network@9.1.6/styles/vis-network.min.css" rel="stylesheet" type="text/css"/>
+    <style>
+        #networkMap {
+            width: 100%;
+            height: 600px;
+            border: 1px solid #444;
+            border-radius: 8px;
+        }
+        .hosts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 1.5rem;
+        }
+        .host-card.hidden {
+            display: none !important;
+        }
+        .filter-badge {
+            cursor: pointer;
+            user-select: none;
+            transition: opacity 0.2s;
+        }
+        .filter-badge:not(.active) {
+            opacity: 0.7;
+        }
+        .empty-state {
+            grid-column: 1 / -1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 200px;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap">
+        <h1 class="mb-2 mb-md-0"><i class="fas fa-network-wired me-2"></i>Сетевое окружение</h1>
+        <div>
+            <button class="btn btn-outline-light btn-sm me-2" id="toggleViewBtn">
+                <i class="fas fa-th"></i> <span id="viewLabel">Карта</span>
+            </button>
+            <button class="btn btn-primary-custom btn-sm me-2" id="scanNowBtn">
+                <i class="fas fa-sync-alt"></i> Сканировать сейчас
+            </button>
+            {% if is_superuser %}
+                <button class="btn btn-outline-light btn-sm ms-1 me-2" data-bs-toggle="modal" data-bs-target="#scanSettingsModal">
+                    <i class="fas fa-cog"></i> Авто
+                </button>
+            {% endif %}
+            <button class="btn btn-outline-danger btn-sm" id="clearHostsBtn">
+                <i class="fas fa-trash-alt"></i> Очистить всё
+            </button>
+            <small class="text-muted ms-2 d-none d-lg-inline">
+                Авто: {% if scan_settings.enabled %}
+                <span class="text-success">вкл ({{ scan_settings.interval_minutes }} мин)</span>
+            {% else %}
+                <span class="text-danger">выкл</span>
+            {% endif %}
+            </small>
+        </div>
+    </div>
+
+    <div id="filterBar" class="mb-3">
+        <span class="me-2"><i class="fas fa-filter"></i> Фильтры:</span>
+        <span class="badge bg-primary filter-badge active" data-filter="all">Все</span>
+        <span class="badge bg-success filter-badge" data-filter="trusted">Доверенные</span>
+        <span class="badge bg-secondary filter-badge" data-filter="untrusted">Не доверенные</span>
+        <span class="badge bg-info filter-badge" data-filter="windows">Windows</span>
+        <span class="badge bg-warning filter-badge" data-filter="linux">Linux</span>
+        <span class="badge bg-danger filter-badge" data-filter="online">Онлайн</span>
+        <span class="badge bg-dark filter-badge" data-filter="offline">Офлайн</span>
+    </div>
+
+    <div id="hostsListView">
+        <div class="hosts-grid">
+            {% for host in hosts %}
+                <div class="host-card"
+                     data-host-id="{{ host.id }}"
+                     data-ip="{{ host.ip_address }}"
+                     data-hostname="{{ host.hostname|default:'' }}"
+                     data-device-type="{{ host.device_type }}"
+                     data-os-info="{{ host.os_info|default:'' }}"
+                     data-manufacturer="{{ host.manufacturer|default:'' }}"
+                     data-notes="{{ host.notes|default:'' }}"
+                     data-trusted="{{ host.is_trusted|lower }}"
+                     data-online="{{ host.is_online|lower }}"
+                     data-is-master="{% if host.ip_address == server_ip %}true{% else %}false{% endif %}"
+                     data-mac="{{ host.mac_address|default:'' }}"
+                     data-agent="{{ host.agent.name|default:'' }}"
+                     data-last-online="{{ host.last_online|date:'d.m.Y H:i:s'|default:'никогда' }}">
+                    <div class="card card-dashboard h-100">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span class="card-title text-truncate" title="{{ host.ip_address }}">
+                                <i class="fas fa-desktop me-2"></i>{{ host.ip_address }}
+                            </span>
+                            <span class="badge {% if host.is_online %}bg-success{% else %}bg-secondary{% endif %}">
+                                {{ host.is_online|yesno:"Онлайн,Офлайн" }}
+                            </span>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-1"><small class="text-muted">Имя:</small> <span class="host-name">{{host.hostname|default:"—"}}</span></div>
+                            <div class="mb-1"><small class="text-muted">MAC:</small> {{ host.mac_address|default:"—" }}</div>
+                            <div class="mb-1"><small class="text-muted">ОС:</small> <span class="host-os">{{ host.os_info|default:"—" }}</span></div>
+                            <div class="mb-1"><small class="text-muted">Тип:</small> {{ host.get_device_type_display }}</div>
+                            <div class="mb-1"><small class="text-muted">Агент:</small>
+                                {% if host.agent %}
+                                    <i class="fas fa-check-circle text-success"></i> {{ host.agent.name }}
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </div>
+                            <div class="mb-1"><small class="text-muted">Последний ответ:</small>
+                                {{ host.last_online|date:"d.m.Y H:i:s"|default:"никогда" }}
+                            </div>
+                        </div>
+                        <div class="card-footer bg-transparent border-top-0 d-flex flex-wrap gap-1">
+                            <button class="btn btn-sm btn-outline-info edit-host-btn"
+                                    data-bs-toggle="modal" data-bs-target="#editHostModal"
+                                    data-host-id="{{ host.id }}">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-light ports-btn"
+                                    data-bs-toggle="modal" data-bs-target="#portsModal"
+                                    data-host-id="{{ host.id }}">
+                                <i class="fas fa-plug"></i> Порты
+                            </button>
+                            <button class="btn btn-sm btn-outline-warning os-scan-btn"
+                                    data-host-id="{{ host.id }}">
+                                <i class="fas fa-microchip"></i> ОС
+                            </button>
+                            {% if host.ip_address != server_ip %}
+                                <button class="btn btn-sm trust-toggle-btn {% if host.is_trusted %}btn-success{% else %}btn-outline-secondary{% endif %}"
+                                        data-host-id="{{ host.id }}">
+                                    <span class="trust-icon">
+                                        <i class="fas {% if host.is_trusted %}fa-check-circle{% else %}fa-shield-alt{% endif %}"></i>
+                                    </span>
+                                    <span class="trust-text">{{ host.is_trusted|yesno:"Довер.,Не довер." }}</span>
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger delete-host-btn"
+                                        data-host-id="{{ host.id }}" data-ip="{{ host.ip_address }}">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            {% else %}
+                                <span class="badge bg-warning text-dark align-self-center px-3 py-2">
+                                    <i class="fas fa-crown me-1"></i>Мастер
+                                </span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            {% empty %}
+                <div class="empty-state">
+                    <div class="text-center">
+                        <i class="fas fa-search fa-3x text-muted mb-3"></i>
+                        <p class="text-muted">Нет данных о хостах. Нажмите «Сканировать сейчас».</p>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div id="networkMapContainer" style="display:none;">
+        <div id="networkMap"></div>
+        <div id="hostInfoPanel" class="mt-4 p-4 bg-dark text-light rounded" style="display:none;">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 id="infoPanelTitle"></h5>
+                <button type="button" class="btn-close btn-close-white" id="closeInfoPanel"></button>
+            </div>
+            <div id="infoPanelContent" class="row">
+                <div class="col-md-6">
+                    <p><strong>IP:</strong> <span id="infoIp"></span></p>
+                    <p><strong>Имя:</strong> <span id="infoHostname"></span></p>
+                    <p><strong>MAC:</strong> <span id="infoMac"></span></p>
+                    <p><strong>ОС:</strong> <span id="infoOs"></span></p>
+                    <p><strong>Тип:</strong> <span id="infoType"></span></p>
+                </div>
+                <div class="col-md-6">
+                    <p><strong>Агент:</strong> <span id="infoAgent"></span></p>
+                    <p><strong>Статус:</strong> <span id="infoStatus"></span></p>
+                    <p><strong>Последний ответ:</strong> <span id="infoLastOnline"></span></p>
+                    <p><strong>Заметки:</strong> <span id="infoNotes"></span></p>
+                    <div id="infoPorts"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="editHostModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark text-light">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-edit me-2"></i>Редактировать хост</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="editHostId">
+                    <div class="mb-3">
+                        <label class="form-label">IP-адрес</label>
+                        <input type="text" class="form-control" id="editIp" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Имя хоста</label>
+                        <input type="text" class="form-control" id="editHostname">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Тип устройства</label>
+                        <select class="form-select" id="editDeviceType">
+                            <option value="unknown">Неизвестно</option>
+                            <option value="router">Маршрутизатор</option>
+                            <option value="switch">Коммутатор</option>
+                            <option value="server">Сервер</option>
+                            <option value="workstation">Рабочая станция</option>
+                            <option value="printer">Принтер</option>
+                            <option value="iot">IoT</option>
+                            <option value="other">Другое</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Операционная система</label>
+                        <input type="text" class="form-control" id="editOsInfo">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Производитель (MAC OUI)</label>
+                        <input type="text" class="form-control" id="editManufacturer">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Заметки</label>
+                        <textarea class="form-control" id="editNotes" rows="2"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="button" class="btn btn-primary" id="saveHostChangesBtn">Сохранить</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="portsModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content bg-dark text-light">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-plug me-2"></i>Сканирование портов</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3 d-flex justify-content-between">
+                        <span id="portsHostLabel">Хост: -</span>
+                        <button class="btn btn-sm btn-primary" id="rescanPortsBtn">
+                            <i class="fas fa-sync-alt"></i> Сканировать порты (1-1024)
+                        </button>
+                    </div>
+                    <table class="table table-dark table-striped">
+                        <thead><tr><th>Порт</th><th>Состояние</th><th>Сервис</th><th>Продукт</th><th>Версия</th></tr></thead>
+                        <tbody id="portsTableBody"><tr id="portsEmptyRow"><td colspan="5" class="text-center text-muted">Нет данных</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% if is_superuser %}
+    <div class="modal fade" id="scanSettingsModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark text-light">
+                <div class="modal-header"><h5 class="modal-title"><i class="fas fa-cog me-2"></i>Настройки автосканирования</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+                <div class="modal-body">
+                    <div class="mb-3 form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="scanEnabled" {% if scan_settings.enabled %}checked{% endif %}>
+                        <label class="form-check-label" for="scanEnabled">Включить автоматическое сканирование</label>
+                    </div>
+                    <div class="mb-3">
+                        <label for="scanInterval" class="form-label">Интервал (минуты)</label>
+                        <input type="number" class="form-control" id="scanInterval" min="1" max="1440" value="{{ scan_settings.interval_minutes }}" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="button" class="btn btn-primary" id="saveScanSettingsBtn">Сохранить</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+{% endblock %}
+
+{% block extra_js %}
+    <script src="https://unpkg.com/vis-network@9.1.6/dist/vis-network.min.js"></script>
+    <script>
+        function getCsrfToken() {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, 10) === 'csrftoken=') {
+                        cookieValue = decodeURIComponent(cookie.substring(10));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+
+        function getHostCard(hostId) {
+            return document.querySelector(`.host-card[data-host-id="${hostId}"]`);
+        }
+
+        document.querySelectorAll('.filter-badge').forEach(badge => {
+            badge.addEventListener('click', function() {
+                document.querySelectorAll('.filter-badge').forEach(b => b.classList.remove('active', 'bg-primary'));
+                this.classList.add('active', 'bg-primary');
+                const filter = this.dataset.filter;
+                document.querySelectorAll('.host-card').forEach(card => {
+                    const trusted = card.dataset.trusted === 'true';
+                    const online = card.dataset.online === 'true';
+                    const os = (card.dataset.osInfo || '').toLowerCase();
+                    let show = true;
+                    switch(filter) {
+                        case 'trusted': show = trusted; break;
+                        case 'untrusted': show = !trusted; break;
+                        case 'windows': show = os.includes('windows'); break;
+                        case 'linux': show = os.includes('linux'); break;
+                        case 'online': show = online; break;
+                        case 'offline': show = !online; break;
+                    }
+                    card.classList.toggle('hidden', !show);
+                });
+            });
+        });
+
+        document.getElementById('clearHostsBtn').addEventListener('click', function() {
+            if (confirm('Действительно удалить ВСЕ записи о хостах, кроме Мастера? Это действие нельзя отменить.')) {
+                fetch('/monitoring/api/network/hosts/clear/', {
+                    method: 'DELETE',
+                    headers: {'X-CSRFToken': getCsrfToken()}
+                }).then(resp => {
+                    if (resp.ok) location.reload();
+                    else alert('Ошибка очистки');
+                });
+            }
+        });
+
+        document.getElementById('scanNowBtn').addEventListener('click', function () {
+            if (this.disabled) return;
+            this.disabled = true;
+            this.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Сканирую...';
+            fetch('/monitoring/api/network/scan/', {
+                method: 'POST',
+                headers: {'X-CSRFToken': getCsrfToken()}
+            }).then(resp => {
+                if (resp.ok) setTimeout(() => location.reload(), 3000);
+                else {
+                    alert('Ошибка запуска сканирования');
+                    this.disabled = false;
+                    this.innerHTML = '<i class="fas fa-sync-alt"></i> Сканировать сейчас';
+                }
+            }).catch(e => {
+                console.error(e);
+                this.disabled = false;
+                this.innerHTML = '<i class="fas fa-sync-alt"></i> Сканировать сейчас';
+            });
+        });
+
+        document.querySelectorAll('.trust-toggle-btn').forEach(btn => {
+            btn.addEventListener('click', async function () {
+                const hostId = this.dataset.hostId;
+                const resp = await fetch(`/monitoring/api/network/host/${hostId}/trust/`, {
+                    method: 'POST',
+                    headers: {'X-CSRFToken': getCsrfToken()}
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    const card = getHostCard(hostId);
+                    if (data.is_trusted) {
+                        this.classList.remove('btn-outline-secondary');
+                        this.classList.add('btn-success');
+                    } else {
+                        this.classList.remove('btn-success');
+                        this.classList.add('btn-outline-secondary');
+                    }
+                    const iconSpan = this.querySelector('.trust-icon i');
+                    const textSpan = this.querySelector('.trust-text');
+                    if (iconSpan) iconSpan.className = data.is_trusted ? 'fas fa-check-circle' : 'fas fa-shield-alt';
+                    if (textSpan) textSpan.textContent = data.is_trusted ? 'Довер.' : 'Не довер.';
+                    if (card) card.dataset.trusted = data.is_trusted.toString();
+                }
+            });
+        });
+
+        document.querySelectorAll('.delete-host-btn').forEach(btn => {
+            btn.addEventListener('click', async function () {
+                const hostId = this.dataset.hostId;
+                const ip = this.dataset.ip;
+                if (!confirm(`Удалить запись о хосте ${ip}?`)) return;
+                const resp = await fetch(`/monitoring/api/network/host/${hostId}/delete/`, {
+                    method: 'DELETE',
+                    headers: {'X-CSRFToken': getCsrfToken()}
+                });
+                if (resp.ok) {
+                    const card = getHostCard(hostId);
+                    if (card) card.remove();
+                } else alert('Ошибка удаления');
+            });
+        });
+
+        const editModalEl = document.getElementById('editHostModal');
+        editModalEl.addEventListener('show.bs.modal', function (event) {
+            const button = event.relatedTarget;
+            const hostId = button.dataset.hostId;
+            const card = getHostCard(hostId);
+            if (!card) return;
+            document.getElementById('editHostId').value = hostId;
+            document.getElementById('editIp').value = card.dataset.ip;
+            document.getElementById('editHostname').value = card.dataset.hostname;
+            document.getElementById('editDeviceType').value = card.dataset.deviceType;
+            document.getElementById('editOsInfo').value = card.dataset.osInfo;
+            document.getElementById('editManufacturer').value = card.dataset.manufacturer;
+            document.getElementById('editNotes').value = card.dataset.notes;
+        });
+        document.getElementById('saveHostChangesBtn').addEventListener('click', async function () {
+            const hostId = document.getElementById('editHostId').value;
+            const data = {
+                hostname: document.getElementById('editHostname').value,
+                device_type: document.getElementById('editDeviceType').value,
+                os_info: document.getElementById('editOsInfo').value,
+                manufacturer: document.getElementById('editManufacturer').value,
+                notes: document.getElementById('editNotes').value
+            };
+            const resp = await fetch(`/monitoring/api/network/host/${hostId}/update/`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken()},
+                body: JSON.stringify(data)
+            });
+            if (resp.ok) {
+                bootstrap.Modal.getInstance(editModalEl).hide();
+                location.reload();
+            } else alert('Ошибка сохранения');
+        });
+
+        const portsModal = document.getElementById('portsModal');
+        let currentPortsHostId = null;
+        async function loadPorts(hostId) {
+            currentPortsHostId = hostId;
+            document.getElementById('portsHostLabel').textContent = 'Хост: ' + hostId;
+            const tbody = document.getElementById('portsTableBody');
+            try {
+                const resp = await fetch(`/monitoring/api/network/host/${hostId}/ports/`);
+                if (!resp.ok) throw new Error('Network error');
+                const data = await resp.json();
+                if (typeof data !== 'object' || Object.keys(data).length === 0) {
+                    tbody.innerHTML = '<tr id="portsEmptyRow"><td colspan="5" class="text-center text-muted">Нет данных</td></tr>';
+                    return;
+                }
+                let html = '';
+                for (const [port, info] of Object.entries(data)) {
+                    html += `<tr><td>${port}</td><td>${info.state || '?'}</td><td>${info.service || '?'}</td><td>${info.product || ''}</td><td>${info.version || ''}</td></tr>`;
+                }
+                tbody.innerHTML = html;
+            } catch(e) {
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger">Ошибка загрузки портов</td></tr>';
+            }
+        }
+        function renderPortsTable(ports) {
+            const tbody = document.getElementById('portsTableBody');
+            if (!ports || Object.keys(ports).length === 0) {
+                tbody.innerHTML = '<tr id="portsEmptyRow"><td colspan="5" class="text-center text-muted">Нет данных</td></tr>';
+                return;
+            }
+            let html = '';
+            for (const [port, info] of Object.entries(ports)) {
+                html += `<tr><td>${port}</td><td>${info.state || '?'}</td><td>${info.service || '?'}</td><td>${info.product || ''}</td><td>${info.version || ''}</td></tr>`;
+            }
+            tbody.innerHTML = html;
+        }
+        portsModal.addEventListener('show.bs.modal', function (event) {
+            const button = event.relatedTarget;
+            loadPorts(button.dataset.hostId);
+        });
+        document.getElementById('rescanPortsBtn').addEventListener('click', async function () {
+            if (!currentPortsHostId) return;
+            this.disabled = true;
+            this.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Сканирую...';
+            try {
+                const resp = await fetch(`/monitoring/api/network/host/${currentPortsHostId}/ports/`, {
+                    method: 'POST',
+                    headers: {'X-CSRFToken': getCsrfToken()}
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    renderPortsTable(data.ports);
+                } else alert('Ошибка сканирования портов');
+            } catch(e) { console.error(e); alert('Ошибка сети'); }
+            finally {
+                this.disabled = false;
+                this.innerHTML = '<i class="fas fa-sync-alt"></i> Сканировать порты (1-1024)';
+            }
+        });
+
+        document.querySelectorAll('.os-scan-btn').forEach(btn => {
+            btn.addEventListener('click', async function () {
+                const hostId = this.dataset.hostId;
+                const originalHtml = this.innerHTML;
+                this.disabled = true;
+                this.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+                try {
+                    const resp = await fetch(`/monitoring/api/network/host/${hostId}/os/`, {
+                        method: 'POST',
+                        headers: {'X-CSRFToken': getCsrfToken()}
+                    });
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        if (data.os_info) {
+                            const card = getHostCard(hostId);
+                            if (card) {
+                                card.dataset.osInfo = data.os_info;
+                                const osSpan = card.querySelector('.host-os');
+                                if (osSpan) osSpan.textContent = data.os_info;
+                            }
+                        }
+                        alert('Сканирование ОС завершено');
+                    } else alert('Ошибка сканирования ОС');
+                } catch (e) { console.error(e); alert('Ошибка сети'); }
+                finally {
+                    this.disabled = false;
+                    this.innerHTML = originalHtml;
+                }
+            });
+        });
+
+        document.getElementById('saveScanSettingsBtn')?.addEventListener('click', async function () {
+            const enabled = document.getElementById('scanEnabled').checked;
+            const interval = parseInt(document.getElementById('scanInterval').value, 10);
+            if (!interval || interval < 1) { alert('Интервал должен быть не менее 1 минуты.'); return; }
+            const resp = await fetch('/monitoring/api/network/settings/', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken()},
+                body: JSON.stringify({enabled, interval_minutes: interval})
+            });
+            if (resp.ok) location.reload();
+            else alert('Ошибка сохранения настроек');
+        });
+
+        let isMapView = false;
+        let networkVis = null;
+
+        document.getElementById('toggleViewBtn').addEventListener('click', function () {
+            isMapView = !isMapView;
+            document.getElementById('hostsListView').style.display = isMapView ? 'none' : 'block';
+            document.getElementById('networkMapContainer').style.display = isMapView ? 'block' : 'none';
+            document.getElementById('viewLabel').textContent = isMapView ? 'Список' : 'Карта';
+            document.getElementById('filterBar').style.display = isMapView ? 'none' : 'block';
+            if (isMapView) initNetworkMap();
+            else {
+                if (networkVis) { networkVis.destroy(); networkVis = null; }
+            }
+        });
+
+        function showHostInfoPanel(card) {
+            document.getElementById('infoPanelTitle').textContent = 'Информация о хосте ' + card.dataset.ip;
+            document.getElementById('infoIp').textContent = card.dataset.ip;
+            document.getElementById('infoHostname').textContent = card.dataset.hostname || '—';
+            document.getElementById('infoMac').textContent = card.dataset.mac || '—';
+            document.getElementById('infoOs').textContent = card.dataset.osInfo || '—';
+            document.getElementById('infoType').textContent = card.dataset.deviceType || '—';
+            let agentHtml = '—';
+            if (card.dataset.agent) {
+                agentHtml = `<i class="fas fa-check-circle text-success"></i> ${card.dataset.agent}`;
+            }
+            document.getElementById('infoAgent').innerHTML = agentHtml;
+            const isOnline = card.dataset.online === 'true';
+            document.getElementById('infoStatus').innerHTML = isOnline
+                ? '<span class="badge bg-success">Онлайн</span>'
+                : '<span class="badge bg-secondary">Офлайн</span>';
+            document.getElementById('infoLastOnline').textContent = card.dataset.lastOnline || '—';
+            document.getElementById('infoNotes').textContent = card.dataset.notes || '—';
+            const hostId = card.dataset.hostId;
+            fetch(`/monitoring/api/network/host/${hostId}/ports/`)
+                .then(resp => resp.json())
+                .then(ports => {
+                    let portHtml = '<strong>Порты:</strong><br>';
+                    if (typeof ports !== 'object' || Object.keys(ports).length === 0) {
+                        portHtml += 'Нет данных';
+                    } else {
+                        portHtml += '<ul class="list-unstyled mb-0">';
+                        for (const [port, info] of Object.entries(ports)) {
+                            portHtml += `<li>${port}: ${info.service || '?'} (${info.state})</li>`;
+                        }
+                        portHtml += '</ul>';
+                    }
+                    document.getElementById('infoPorts').innerHTML = portHtml;
+                });
+            document.getElementById('hostInfoPanel').style.display = 'block';
+        }
+
+        document.getElementById('closeInfoPanel').addEventListener('click', function() {
+            document.getElementById('hostInfoPanel').style.display = 'none';
+        });
+
+        function initNetworkMap() {
+            const container = document.getElementById('networkMap');
+            const nodes = [];
+            const edges = [];
+            const hostCards = document.querySelectorAll('.host-card');
+            const serverIp = '{{ server_ip }}';
+
+            nodes.push({
+                id: 'master',
+                label: `Мастер\n${serverIp}`,
+                shape: 'star',
+                color: { background: '#ffc107', border: '#fff' },
+                font: { color: '#ffffff', size: 14, bold: true },
+                x: 0,
+                y: 0,
+                fixed: true
+            });
+
+            const hostList = Array.from(hostCards).filter(card => card.dataset.isMaster !== 'true');
+            const angleStep = (2 * Math.PI) / Math.max(hostList.length, 1);
+            const radius = 200;
+
+            hostList.forEach((card, index) => {
+                const id = parseInt(card.dataset.hostId);
+                const ip = card.dataset.ip;
+                const hostname = card.dataset.hostname;
+                const isTrusted = card.dataset.trusted === 'true';
+                const isOnline = card.dataset.online === 'true';
+                let color = isTrusted ? '#28a745' : (isOnline ? '#007bff' : '#6c757d');
+                const angle = index * angleStep;
+                const x = radius * Math.cos(angle);
+                const y = radius * Math.sin(angle);
+                nodes.push({
+                    id: id,
+                    label: `${ip}\n${hostname}`,
+                    shape: 'box',
+                    color: { background: color, border: '#fff' },
+                    font: { color: '#fff', size: 11 },
+                    x: x,
+                    y: y
+                });
+                edges.push({ from: 'master', to: id });
+            });
+
+            const data = { nodes: new vis.DataSet(nodes), edges: new vis.DataSet(edges) };
+            const options = {
+                physics: false,
+                interaction: { dragNodes: true }
+            };
+            if (networkVis) networkVis.destroy();
+            networkVis = new vis.Network(container, data, options);
+
+            networkVis.on('click', function(params) {
+                if (params.nodes.length > 0) {
+                    const nodeId = params.nodes[0];
+                    if (nodeId === 'master') return;
+                    const card = getHostCard(nodeId);
+                    if (card) showHostInfoPanel(card);
+                }
+            });
+        }
+    </script>
+{% endblock %}

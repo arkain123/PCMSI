@@ -1,0 +1,417 @@
+{% extends 'monitoring/base.html' %}
+{% load static %}
+
+{% block title %}Управление пользователями{% endblock %}
+
+{% block extra_head %}
+<style>
+    .form-control::placeholder {
+        color: #8b8b93 !important;
+        opacity: 1 !important;
+    }
+    small.text-muted {
+        color: #a1a1aa !important;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="fas fa-users me-2"></i> Пользователи</h1>
+    <button class="btn btn-primary-custom" data-bs-toggle="modal" data-bs-target="#addUserModal">
+        <i class="fas fa-plus"></i> Добавить пользователя
+    </button>
+</div>
+
+<div class="card-dashboard">
+    <div class="card-header">
+        <span class="card-title">Список пользователей</span>
+        <span class="text-muted">Всего: {{users|length}}</span>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-dark-custom mb-0">
+                <thead>
+                    <tr>
+                        <th>Пользователь</th>
+                        <th>Email</th>
+                        <th>Роль</th>
+                        <th>Активен</th>
+                        <th>Дата регистрации</th>
+                        <th>Последний вход</th>
+                        <th>Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for u in users %}
+                    <tr>
+                        <td>
+                            <strong>{{ u.username }}</strong>
+                            {% if u.id == current_user_id %}
+                                <span class="badge bg-info ms-1">вы</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ u.email|default:"—" }}</td>
+                        <td>
+                            {% if u.is_superuser %}
+                                <span class="badge bg-warning text-dark">Администратор</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Пользователь</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if u.is_active %}
+                                <span class="badge bg-success">Да</span>
+                            {% else %}
+                                <span class="badge bg-danger">Нет</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ u.date_joined|date:"d.m.Y" }}</td>
+                        <td>{{ u.last_login|date:"d.m.Y H:i"|default:"—" }}</td>
+                        <td class="action-buttons">
+                            <button class="btn btn-sm btn-outline-info edit-user-btn"
+                                    data-user-id="{{ u.id }}"
+                                    data-username="{{ u.username }}"
+                                    data-email="{{ u.email|default:'' }}"
+                                    data-is-superuser="{{ u.is_superuser|lower }}"
+                                    data-is-active="{{ u.is_active|lower }}">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-warning change-password-btn"
+                                    data-user-id="{{ u.id }}"
+                                    data-username="{{ u.username }}">
+                                <i class="fas fa-key"></i>
+                            </button>
+                            {% if u.id != current_user_id %}
+                            <button class="btn btn-sm btn-outline-danger delete-user-btn"
+                                    data-user-id="{{ u.id }}"
+                                    data-username="{{ u.username }}">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" class="text-center py-4 text-muted">Нет пользователей</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="addUserModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-user-plus me-2"></i>Добавить пользователя</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="addUserForm">
+                    <div class="mb-3">
+                        <label class="form-label">Имя пользователя *</label>
+                        <input type="text" class="form-control" id="addUsername" required placeholder="Например: ivanov">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Пароль *</label>
+                        <input type="password" class="form-control" id="addPassword" required placeholder="Не менее 8 символов">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Email</label>
+                        <input type="email" class="form-control" id="addEmail" placeholder="user@example.com">
+                    </div>
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="addIsSuperuser">
+                        <label class="form-check-label" for="addIsSuperuser">Суперпользователь</label>
+                    </div>
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="addIsActive" checked>
+                        <label class="form-check-label" for="addIsActive">Активен</label>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-primary-custom" id="saveUserBtn">
+                    <i class="fas fa-save"></i> Сохранить
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="editUserModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-edit me-2"></i>Редактировать пользователя</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editUserForm">
+                    <input type="hidden" id="editUserId">
+                    <div class="mb-3">
+                        <label class="form-label">Имя пользователя *</label>
+                        <input type="text" class="form-control" id="editUsername" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Email</label>
+                        <input type="email" class="form-control" id="editEmail">
+                    </div>
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="editIsSuperuser">
+                        <label class="form-check-label" for="editIsSuperuser">Суперпользователь</label>
+                    </div>
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="editIsActive">
+                        <label class="form-check-label" for="editIsActive">Активен</label>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-primary-custom" id="updateUserBtn">
+                    <i class="fas fa-save"></i> Обновить
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="changePasswordModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-key me-2"></i>Сменить пароль</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="changePasswordForm">
+                    <input type="hidden" id="changePasswordUserId">
+                    <p>Пользователь: <strong id="changePasswordUsername"></strong></p>
+                    <div class="mb-3">
+                        <label class="form-label">Новый пароль *</label>
+                        <input type="password" class="form-control" id="newPassword" required placeholder="Новый пароль">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Подтверждение *</label>
+                        <input type="password" class="form-control" id="confirmPassword" required placeholder="Повторите пароль">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-primary-custom" id="changePasswordBtn">
+                    <i class="fas fa-save"></i> Установить пароль
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="deleteUserConfirmModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-exclamation-triangle text-danger me-2"></i>Подтверждение удаления</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Вы уверены, что хотите удалить пользователя <strong id="deleteUserName"></strong>?</p>
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-circle"></i>
+                    <strong>Внимание!</strong> Это действие нельзя отменить.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-danger" id="confirmDeleteUserBtn">
+                    <i class="fas fa-trash"></i> Удалить
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function getCsrfToken() {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, 10) === 'csrftoken=') {
+                cookieValue = decodeURIComponent(cookie.substring(10));
+                break;
+            }
+        }
+    }
+    return cookieValue;
+}
+
+function showAlert(message, type = 'success') {
+    const alert = document.createElement('div');
+    alert.className = `alert alert-${type} alert-dismissible fade show position-fixed top-0 start-50 translate-middle-x mt-3`;
+    alert.style.zIndex = '9999';
+    alert.innerHTML = `${message}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>`;
+    document.body.appendChild(alert);
+    setTimeout(() => alert.remove(), 3000);
+}
+
+document.getElementById('saveUserBtn').addEventListener('click', async function() {
+    const username = document.getElementById('addUsername').value.trim();
+    const password = document.getElementById('addPassword').value;
+    const email = document.getElementById('addEmail').value.trim();
+    const is_superuser = document.getElementById('addIsSuperuser').checked;
+    const is_active = document.getElementById('addIsActive').checked;
+
+    if (!username || !password) {
+        showAlert('Имя пользователя и пароль обязательны', 'danger');
+        return;
+    }
+    if (password.length < 8) {
+        showAlert('Пароль должен быть не менее 8 символов', 'danger');
+        return;
+    }
+
+    try {
+        const resp = await fetch('/monitoring/api/user/create/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCsrfToken()
+            },
+            body: JSON.stringify({ username, password, email, is_superuser, is_active })
+        });
+        if (resp.ok) {
+            location.reload();
+        } else {
+            const data = await resp.json();
+            showAlert('Ошибка: ' + (data.error || 'Не удалось создать пользователя'), 'danger');
+        }
+    } catch(e) {
+        showAlert('Ошибка сети', 'danger');
+    }
+});
+
+document.querySelectorAll('.edit-user-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        document.getElementById('editUserId').value = this.dataset.userId;
+        document.getElementById('editUsername').value = this.dataset.username;
+        document.getElementById('editEmail').value = this.dataset.email;
+        document.getElementById('editIsSuperuser').checked = this.dataset.isSuperuser === 'true';
+        document.getElementById('editIsActive').checked = this.dataset.isActive === 'true';
+        new bootstrap.Modal(document.getElementById('editUserModal')).show();
+    });
+});
+
+document.getElementById('updateUserBtn').addEventListener('click', async function() {
+    const userId = document.getElementById('editUserId').value;
+    const username = document.getElementById('editUsername').value.trim();
+    const email = document.getElementById('editEmail').value.trim();
+    const is_superuser = document.getElementById('editIsSuperuser').checked;
+    const is_active = document.getElementById('editIsActive').checked;
+
+    if (!username) {
+        showAlert('Имя пользователя обязательно', 'danger');
+        return;
+    }
+
+    try {
+        const resp = await fetch(`/monitoring/api/user/${userId}/update/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCsrfToken()
+            },
+            body: JSON.stringify({ username, email, is_superuser, is_active })
+        });
+        if (resp.ok) {
+            location.reload();
+        } else {
+            const data = await resp.json();
+            showAlert('Ошибка: ' + (data.error || 'Не удалось обновить пользователя'), 'danger');
+        }
+    } catch(e) {
+        showAlert('Ошибка сети', 'danger');
+    }
+});
+
+document.querySelectorAll('.change-password-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        document.getElementById('changePasswordUserId').value = this.dataset.userId;
+        document.getElementById('changePasswordUsername').textContent = this.dataset.username;
+        document.getElementById('newPassword').value = '';
+        document.getElementById('confirmPassword').value = '';
+        new bootstrap.Modal(document.getElementById('changePasswordModal')).show();
+    });
+});
+
+document.getElementById('changePasswordBtn').addEventListener('click', async function() {
+    const userId = document.getElementById('changePasswordUserId').value;
+    const password = document.getElementById('newPassword').value;
+    const confirm = document.getElementById('confirmPassword').value;
+
+    if (!password || password.length < 8) {
+        showAlert('Пароль должен быть не менее 8 символов', 'danger');
+        return;
+    }
+    if (password !== confirm) {
+        showAlert('Пароли не совпадают', 'danger');
+        return;
+    }
+
+    try {
+        const resp = await fetch(`/monitoring/api/user/${userId}/change-password/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCsrfToken()
+            },
+            body: JSON.stringify({ password })
+        });
+        if (resp.ok) {
+            bootstrap.Modal.getInstance(document.getElementById('changePasswordModal')).hide();
+            showAlert('Пароль успешно изменён');
+        } else {
+            const data = await resp.json();
+            showAlert('Ошибка: ' + (data.error || 'Не удалось изменить пароль'), 'danger');
+        }
+    } catch(e) {
+        showAlert('Ошибка сети', 'danger');
+    }
+});
+
+let deleteUserId = null;
+document.querySelectorAll('.delete-user-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        deleteUserId = this.dataset.userId;
+        document.getElementById('deleteUserName').textContent = this.dataset.username;
+        new bootstrap.Modal(document.getElementById('deleteUserConfirmModal')).show();
+    });
+});
+
+document.getElementById('confirmDeleteUserBtn').addEventListener('click', async function() {
+    if (!deleteUserId) return;
+    try {
+        const resp = await fetch(`/monitoring/api/user/${deleteUserId}/delete/`, {
+            method: 'DELETE',
+            headers: { 'X-CSRFToken': getCsrfToken() }
+        });
+        if (resp.ok) {
+            location.reload();
+        } else {
+            const data = await resp.json();
+            showAlert('Ошибка: ' + (data.error || 'Не удалось удалить пользователя'), 'danger');
+        }
+    } catch(e) {
+        showAlert('Ошибка сети', 'danger');
+    }
+});
+</script>
+{% endblock %}

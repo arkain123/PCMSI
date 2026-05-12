@@ -1,0 +1,772 @@
+{% extends 'monitoring/base.html' %}
+{% load static %}
+
+{% block title %}Алерты — правила{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="fas fa-exclamation-triangle me-2"></i> Правила алертов</h1>
+    <div class="dropdown">
+        <button class="btn btn-primary-custom dropdown-toggle" type="button" id="createRuleDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+            <i class="fas fa-plus"></i> Создать правило
+        </button>
+        <ul class="dropdown-menu dropdown-menu-dark" aria-labelledby="createRuleDropdown">
+            <li><a class="dropdown-item" href="#" id="createMetricRuleBtn"><i class="fas fa-chart-line me-2"></i> Правило метрик</a></li>
+            <li><a class="dropdown-item" href="#" id="createHostRuleBtn"><i class="fas fa-network-wired me-2"></i> Правило хостов</a></li>
+        </ul>
+    </div>
+</div>
+
+<div class="row">
+    {% for rule in rules %}
+    <div class="col-md-6 col-lg-4 mb-4">
+        <div class="card-dashboard">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span class="card-title">
+                    {% if rule.rule_type == 'metric' %}
+                        <i class="fas fa-chart-line me-2"></i>
+                    {% else %}
+                        <i class="fas fa-network-wired me-2"></i>
+                    {% endif %}
+                    {{ rule.name }}
+                </span>
+                <div>
+                    {% if rule.is_active %}
+                        <span class="badge bg-success">Активно</span>
+                    {% else %}
+                        <span class="badge bg-danger">Отключено</span>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="text-muted">Тип:</label>
+                    <strong>{{ rule.get_rule_type_display }}</strong>
+                </div>
+                {% if rule.rule_type == 'metric' and rule.agent %}
+                <div class="mb-3">
+                    <label class="text-muted">Агент:</label>
+                    <strong>{{ rule.agent.name }}</strong>
+                </div>
+                {% elif rule.rule_type == 'host' %}
+                <div class="mb-3">
+                    <label class="text-muted">Цель:</label>
+                    <strong>
+                        {% if rule.host %}
+                            {{ rule.host.ip_address }} ({{ rule.host.hostname|default:"N/A" }})
+                        {% else %}
+                            Любой хост
+                        {% endif %}
+                    </strong>
+                </div>
+                {% endif %}
+
+                <div class="mb-3">
+                    <label class="text-muted">Условия (И):</label>
+                    <ul class="list-unstyled ms-2">
+                        {% for condition in rule.conditions.all %}
+                        <li>
+                            {% if condition.is_active %}
+                                <i class="fas fa-check-circle text-success"></i>
+                            {% else %}
+                                <i class="fas fa-times-circle text-danger"></i>
+                            {% endif %}
+                            {% if rule.rule_type == 'metric' %}
+                                <code>{{ condition.metric_name }}</code> {{ condition.get_operator_display }} {{ condition.threshold }}
+                            {% else %}
+                                <code>{{ condition.get_host_field_display }}</code>
+                                {{ condition.get_operator_display }}
+                                {% if condition.host_field == 'online' or condition.host_field == 'trusted' %}
+                                    {{ condition.value_str|yesno:"Да,Нет" }}
+                                {% else %}
+                                    {{ condition.value_str }}
+                                {% endif %}
+                            {% endif %}
+                        </li>
+                        {% empty %}
+                        <li class="text-muted">Нет условий</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+
+                <div class="mb-3">
+                    <label class="text-muted">Действия:</label>
+                    <ul class="list-unstyled ms-2">
+                        {% for action in rule.actions.all %}
+                        <li>
+                            {% if action.is_active %}
+                                <i class="fas fa-play-circle text-success"></i>
+                            {% else %}
+                                <i class="fas fa-stop-circle text-danger"></i>
+                            {% endif %}
+                            {{ action.get_action_type_display }} → <strong>{{ action.target.name }}</strong>
+                            <br><small class="text-muted">{{ action.message|truncatechars:50 }}</small>
+                        </li>
+                        {% empty %}
+                        <li class="text-muted">Нет действий</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+
+                {% if rule.rule_type == 'metric' %}
+                <div class="mb-3">
+                    <label class="text-muted">Перерыв:</label>
+                    {{ rule.cooldown_minutes }} мин.
+                    {% if rule.last_triggered %}
+                        <br><small class="text-muted">Последний алерт: {{ rule.last_triggered|date:"d.m.Y H:i:s" }}</small>
+                    {% endif %}
+                </div>
+                {% endif %}
+
+                <div class="d-flex gap-2">
+                    <button class="btn btn-sm btn-outline-info edit-rule-btn"
+                            data-rule-id="{{ rule.id }}">
+                        <i class="fas fa-edit"></i> Изменить
+                    </button>
+
+                    {% if rule.is_active %}
+                        <button class="btn btn-sm btn-outline-secondary toggle-rule-btn"
+                                data-rule-id="{{ rule.id }}"
+                                data-action="deactivate">
+                            <i class="fas fa-pause"></i> Отключить
+                        </button>
+                    {% else %}
+                        <button class="btn btn-sm btn-outline-success toggle-rule-btn"
+                                data-rule-id="{{ rule.id }}"
+                                data-action="activate">
+                            <i class="fas fa-play"></i> Включить
+                        </button>
+                    {% endif %}
+
+                    <button class="btn btn-sm btn-outline-danger delete-rule-btn"
+                            data-rule-id="{{ rule.id }}"
+                            data-rule-name="{{ rule.name }}">
+                        <i class="fas fa-trash"></i> Удалить
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% empty %}
+    <div class="col-12">
+        <div class="card-dashboard">
+            <div class="card-body text-center py-5">
+                <i class="fas fa-bell-slash fa-3x mb-3 text-muted"></i>
+                <p style="color: #a1a1aa;">Нет настроенных правил алертов</p>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="modal fade" id="addRuleModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header">
+                <h5 class="modal-title" id="ruleModalTitle">
+                    <i class="fas fa-plus-circle me-2"></i>Создать правило
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="ruleForm">
+                    <input type="hidden" id="ruleId">
+                    <input type="hidden" id="ruleType">
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Название правила *</label>
+                            <input type="text" class="form-control" id="ruleName" required>
+                        </div>
+                        <div class="col-md-6" id="targetSelectContainer">
+                            <label class="form-label" id="targetLabel">Агент *</label>
+                            <select class="form-select" id="ruleTarget" required>
+                                <option value="">-- выберите --</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="row mb-3" id="cooldownBlock">
+                        <div class="col-md-6">
+                            <label class="form-label">Перерыв между алертами (мин)</label>
+                            <input type="number" class="form-control" id="ruleCooldown"
+                                   value="5" min="1" max="1440">
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Условия (все должны выполниться)</label>
+                        <div id="conditionsContainer"></div>
+                        <button class="btn btn-sm btn-outline-secondary mt-2" type="button" id="addConditionBtn">
+                            <i class="fas fa-plus"></i> Добавить условие
+                        </button>
+                    </div>
+
+                    <hr class="border-secondary">
+
+                    <div class="mb-3">
+                        <label class="form-label">Действия при алерте</label>
+                        <div id="actionsContainer"></div>
+                        <button class="btn btn-sm btn-outline-secondary mt-2" type="button" id="addActionBtn">
+                            <i class="fas fa-plus"></i> Добавить действие
+                        </button>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-primary-custom" id="saveRuleBtn">
+                    <i class="fas fa-save"></i> Сохранить правило
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    let currentRuleType = 'metric';
+    let hostFieldsCache = null;
+    let editMode = false;
+    let editingRuleId = null;
+    let ruleModal = null;
+
+    const modalElement = document.getElementById('addRuleModal');
+    if (modalElement) {
+        ruleModal = new bootstrap.Modal(modalElement);
+        modalElement.addEventListener('hidden.bs.modal', function() {
+            document.getElementById('ruleForm').reset();
+            document.getElementById('ruleId').value = '';
+            document.getElementById('conditionsContainer').innerHTML = '';
+            document.getElementById('actionsContainer').innerHTML = '';
+            editMode = false;
+            editingRuleId = null;
+        });
+    }
+
+    function getCsrfToken() {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, 10) === 'csrftoken=') {
+                    cookieValue = decodeURIComponent(cookie.substring(10));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+
+    function showAlert(message, type = 'success') {
+        const alert = document.createElement('div');
+        alert.className = `alert alert-${type} alert-dismissible fade show position-fixed top-0 start-50 translate-middle-x mt-3`;
+        alert.style.zIndex = '9999';
+        alert.innerHTML = `${message}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>`;
+        document.body.appendChild(alert);
+        setTimeout(() => alert.remove(), 3000);
+    }
+
+    async function loadTargets(type) {
+        const select = document.getElementById('ruleTarget');
+        if (!select) return;
+        select.innerHTML = '';
+        if (type === 'metric') {
+            select.innerHTML = '<option value="">-- выберите агента --</option>';
+            {% for agent in agents %}
+            select.innerHTML += '<option value="{{ agent.id }}">{{ agent.name }}</option>';
+            {% endfor %}
+        } else {
+            select.innerHTML = '<option value="">-- выберите хост (пусто = любой) --</option>';
+            try {
+                const resp = await fetch('/monitoring/api/hosts/list/');
+                if (resp.ok) {
+                    const hosts = await resp.json();
+                    hosts.forEach(h => {
+                        const opt = document.createElement('option');
+                        opt.value = h.id;
+                        opt.textContent = h.name;
+                        select.appendChild(opt);
+                    });
+                }
+            } catch(e) { console.error(e); }
+        }
+    }
+
+    async function getHostFields() {
+        if (hostFieldsCache) return hostFieldsCache;
+        try {
+            const resp = await fetch('/monitoring/api/alert-rule/host-fields/');
+            if (resp.ok) {
+                hostFieldsCache = await resp.json();
+                return hostFieldsCache;
+            }
+        } catch(e) { console.error(e); }
+        return {};
+    }
+
+    async function createConditionRow(conditionData = null) {
+        const div = document.createElement('div');
+        div.className = 'condition-row row mb-2 align-items-end';
+
+        if (currentRuleType === 'metric') {
+            div.innerHTML = `
+                <div class="col-md-4">
+                    <select class="form-select condition-metric" required>
+                        <option value="">Выберите метрику</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <select class="form-select condition-operator">
+                        <option value=">">> (больше)</option>
+                        <option value="<">< (меньше)</option>
+                        <option value=">=">>= (больше или равно)</option>
+                        <option value="<="><= (меньше или равно)</option>
+                        <option value="==">== (равно)</option>
+                        <option value="!=">!= (не равно)</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <input type="number" class="form-control condition-threshold" step="any" placeholder="Значение" required>
+                </div>
+                <div class="col-md-2">
+                    <button class="btn btn-outline-danger btn-sm remove-condition-btn" type="button"><i class="fas fa-times"></i></button>
+                </div>`;
+
+            const agentId = document.getElementById('ruleTarget').value;
+            if (agentId) {
+                try {
+                    const resp = await fetch(`/monitoring/api/agent/${agentId}/metrics-alerts/`);
+                    const metrics = await resp.json();
+                    const select = div.querySelector('.condition-metric');
+                    metrics.forEach(m => {
+                        const opt = document.createElement('option');
+                        opt.value = m;
+                        opt.textContent = m;
+                        if (conditionData && conditionData.metric_name === m) opt.selected = true;
+                        select.appendChild(opt);
+                    });
+                } catch(e) { console.error(e); }
+            }
+            if (conditionData) {
+                div.querySelector('.condition-operator').value = conditionData.operator || '>';
+                if (conditionData.threshold !== undefined) {
+                    div.querySelector('.condition-threshold').value = conditionData.threshold;
+                }
+            }
+        } else {
+            const fields = await getHostFields();
+            div.innerHTML = `
+                <div class="col-md-3">
+                    <select class="form-select condition-host-field" required>
+                        <option value="">Выберите поле</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <select class="form-select condition-host-operator"></select>
+                </div>
+                <div class="col-md-4">
+                    <input type="text" class="form-control condition-host-value" placeholder="Значение">
+                    <select class="form-select condition-host-bool" style="display:none;">
+                        <option value="true">Да</option>
+                        <option value="false">Нет</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <button class="btn btn-outline-danger btn-sm remove-condition-btn" type="button"><i class="fas fa-times"></i></button>
+                </div>`;
+
+            const fieldSelect = div.querySelector('.condition-host-field');
+            const opSelect = div.querySelector('.condition-host-operator');
+            const valueInput = div.querySelector('.condition-host-value');
+            const boolSelect = div.querySelector('.condition-host-bool');
+
+            for (const key in fields) {
+                const opt = document.createElement('option');
+                opt.value = key;
+                opt.textContent = fields[key].label;
+                if (conditionData && conditionData.host_field === key) opt.selected = true;
+                fieldSelect.appendChild(opt);
+            }
+
+            const updateOperatorsAndInput = () => {
+                const selectedField = fields[fieldSelect.value];
+                if (!selectedField) return;
+                opSelect.innerHTML = '';
+                selectedField.operators.forEach(op => {
+                    const opt = document.createElement('option');
+                    opt.value = op;
+                    opt.textContent = op;
+                    if (conditionData && conditionData.operator === op) opt.selected = true;
+                    opSelect.appendChild(opt);
+                });
+                if (selectedField.value_type === 'boolean') {
+                    valueInput.style.display = 'none';
+                    boolSelect.style.display = 'block';
+                    if (conditionData && conditionData.value_str !== undefined) {
+                        boolSelect.value = conditionData.value_str;
+                    }
+                } else {
+                    valueInput.style.display = 'block';
+                    boolSelect.style.display = 'none';
+                    valueInput.type = selectedField.value_type === 'number' ? 'number' : 'text';
+                    if (conditionData && conditionData.value_str !== undefined) {
+                        valueInput.value = conditionData.value_str;
+                    }
+                }
+            };
+
+            fieldSelect.addEventListener('change', updateOperatorsAndInput);
+            if (conditionData && conditionData.host_field) {
+                fieldSelect.value = conditionData.host_field;
+            } else if (fieldSelect.options.length > 1) {
+                fieldSelect.selectedIndex = 1;
+            }
+            updateOperatorsAndInput();
+        }
+
+        div.querySelector('.remove-condition-btn').addEventListener('click', () => {
+            const container = document.getElementById('conditionsContainer');
+            if (container && container.children.length > 1) div.remove();
+        });
+
+        return div;
+    }
+
+    async function createActionRow(actionData = null) {
+        const div = document.createElement('div');
+        div.className = 'action-row row mb-2 align-items-end';
+        div.innerHTML = `
+            <div class="col-md-3">
+                <select class="form-select action-type">
+                    <option value="telegram">Telegram</option>
+                    <option value="discord">Discord</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <select class="form-select action-target" required>
+                    <option value="">Выберите бота</option>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <input type="text" class="form-control action-message" placeholder="Сообщение" required>
+            </div>
+            <div class="col-md-2">
+                <button class="btn btn-outline-danger btn-sm remove-action-btn" type="button"><i class="fas fa-times"></i></button>
+            </div>`;
+
+        try {
+            const resp = await fetch('/monitoring/api/notification-targets/list/');
+            const targets = await resp.json();
+            const select = div.querySelector('.action-target');
+            targets.forEach(t => {
+                const opt = document.createElement('option');
+                opt.value = t.id;
+                opt.textContent = `${t.name} (${t.target_type})`;
+                if (actionData && String(t.id) === String(actionData.target_id)) opt.selected = true;
+                select.appendChild(opt);
+            });
+        } catch(e) { console.error(e); }
+
+        if (actionData) {
+            div.querySelector('.action-type').value = actionData.action_type || 'telegram';
+            div.querySelector('.action-message').value = actionData.message || '';
+        }
+
+        div.querySelector('.remove-action-btn').addEventListener('click', () => {
+            const container = document.getElementById('actionsContainer');
+            if (container && container.children.length > 1) div.remove();
+        });
+
+        return div;
+    }
+
+    async function openRuleModal(type, ruleId = null) {
+        currentRuleType = type;
+        document.getElementById('ruleType').value = type;
+        document.getElementById('ruleModalTitle').innerHTML = `<i class="fas ${type === 'metric' ? 'fa-chart-line' : 'fa-network-wired'} me-2"></i>${ruleId ? 'Редактировать' : 'Создать'} правило`;
+        document.getElementById('ruleForm').reset();
+        document.getElementById('ruleId').value = ruleId || '';
+        document.getElementById('conditionsContainer').innerHTML = '';
+        document.getElementById('actionsContainer').innerHTML = '';
+
+        const cooldownBlock = document.getElementById('cooldownBlock');
+        if (cooldownBlock) {
+            cooldownBlock.style.display = type === 'metric' ? 'block' : 'none';
+        }
+
+        const targetLabel = document.getElementById('targetLabel');
+        if (targetLabel) {
+            targetLabel.textContent = type === 'metric' ? 'Агент *' : 'Хост';
+        }
+        await loadTargets(type);
+
+        if (!ruleId) {
+            const condRow = await createConditionRow();
+            document.getElementById('conditionsContainer').appendChild(condRow);
+            const actionRow = await createActionRow();
+            document.getElementById('actionsContainer').appendChild(actionRow);
+            editMode = false;
+            editingRuleId = null;
+        } else {
+            try {
+                const resp = await fetch(`/monitoring/api/alert-rule/${ruleId}/`);
+                if (!resp.ok) throw new Error('Не удалось загрузить правило');
+                const rule = await resp.json();
+                document.getElementById('ruleName').value = rule.name;
+                if (type === 'metric') {
+                    document.getElementById('ruleCooldown').value = rule.cooldown_minutes;
+                }
+                const targetSelect = document.getElementById('ruleTarget');
+                if (type === 'metric') {
+                    targetSelect.value = rule.agent_id || '';
+                } else {
+                    targetSelect.value = rule.host_id || '';
+                }
+                const conditions = rule.conditions || [];
+                if (conditions.length > 0) {
+                    for (const cond of conditions) {
+                        const row = await createConditionRow(cond);
+                        document.getElementById('conditionsContainer').appendChild(row);
+                    }
+                } else {
+                    const row = await createConditionRow();
+                    document.getElementById('conditionsContainer').appendChild(row);
+                }
+                const actions = rule.actions || [];
+                if (actions.length > 0) {
+                    for (const act of actions) {
+                        const row = await createActionRow(act);
+                        document.getElementById('actionsContainer').appendChild(row);
+                    }
+                } else {
+                    const row = await createActionRow();
+                    document.getElementById('actionsContainer').appendChild(row);
+                }
+                editMode = true;
+                editingRuleId = rule.id;
+            } catch(e) {
+                console.error(e);
+                showAlert('Ошибка загрузки правила', 'danger');
+                return;
+            }
+        }
+        if (ruleModal) ruleModal.show();
+        else console.error('Модальное окно не инициализировано');
+    }
+
+    const createMetricBtn = document.getElementById('createMetricRuleBtn');
+    const createHostBtn = document.getElementById('createHostRuleBtn');
+    if (createMetricBtn) {
+        createMetricBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            openRuleModal('metric');
+        });
+    }
+    if (createHostBtn) {
+        createHostBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            openRuleModal('host');
+        });
+    }
+
+    const addConditionBtn = document.getElementById('addConditionBtn');
+    if (addConditionBtn) {
+        addConditionBtn.addEventListener('click', async () => {
+            const row = await createConditionRow();
+            document.getElementById('conditionsContainer').appendChild(row);
+        });
+    }
+    const addActionBtn = document.getElementById('addActionBtn');
+    if (addActionBtn) {
+        addActionBtn.addEventListener('click', async () => {
+            const row = await createActionRow();
+            document.getElementById('actionsContainer').appendChild(row);
+        });
+    }
+
+    const saveRuleBtn = document.getElementById('saveRuleBtn');
+    if (saveRuleBtn) {
+        saveRuleBtn.addEventListener('click', async () => {
+            const name = document.getElementById('ruleName').value.trim();
+            const cooldown = parseInt(document.getElementById('ruleCooldown').value);
+            if (!name) { showAlert('Введите название', 'danger'); return; }
+
+            const conditions = [];
+            document.querySelectorAll('.condition-row').forEach(row => {
+                if (currentRuleType === 'metric') {
+                    const metric = row.querySelector('.condition-metric')?.value;
+                    const operator = row.querySelector('.condition-operator')?.value;
+                    const threshold = parseFloat(row.querySelector('.condition-threshold')?.value);
+                    if (metric && !isNaN(threshold)) {
+                        conditions.push({
+                            metric_name: metric,
+                            operator,
+                            threshold,
+                            is_active: true
+                        });
+                    }
+                } else {
+                    const field = row.querySelector('.condition-host-field')?.value;
+                    const operator = row.querySelector('.condition-host-operator')?.value;
+                    const valueInput = row.querySelector('.condition-host-value');
+                    const boolSelect = row.querySelector('.condition-host-bool');
+                    if (field) {
+                        let valueStr = '';
+                        const fields = hostFieldsCache || {};
+                        const fieldInfo = fields[field];
+                        if (fieldInfo && fieldInfo.value_type === 'boolean') {
+                            valueStr = boolSelect?.value || 'true';
+                        } else {
+                            valueStr = valueInput?.value || '';
+                        }
+                        conditions.push({
+                            host_field: field,
+                            operator,
+                            value_str: valueStr,
+                            threshold: (fieldInfo && fieldInfo.value_type === 'number') ? parseFloat(valueStr) : null,
+                            is_active: true
+                        });
+                    }
+                }
+            });
+
+            if (conditions.length === 0) {
+                showAlert('Добавьте хотя бы одно условие', 'danger');
+                return;
+            }
+
+            const actions = [];
+            document.querySelectorAll('.action-row').forEach(row => {
+                const actionType = row.querySelector('.action-type')?.value;
+                const targetId = row.querySelector('.action-target')?.value;
+                const message = row.querySelector('.action-message')?.value.trim();
+                if (targetId && message) {
+                    actions.push({
+                        action_type: actionType,
+                        target_id: parseInt(targetId),
+                        message,
+                        is_active: true
+                    });
+                }
+            });
+
+            if (actions.length === 0) {
+                showAlert('Добавьте хотя бы одно действие', 'danger');
+                return;
+            }
+
+            const payload = {
+                name,
+                rule_type: currentRuleType,
+                cooldown_minutes: cooldown,
+                conditions,
+                actions
+            };
+            const targetSelect = document.getElementById('ruleTarget');
+            if (currentRuleType === 'metric') {
+                const agentId = targetSelect.value;
+                if (!agentId) { showAlert('Выберите агента', 'danger'); return; }
+                payload.agent_id = agentId;
+            } else {
+                payload.host_id = targetSelect.value || null;
+            }
+
+            const url = editMode
+                ? `/monitoring/api/alert-rule/${editingRuleId}/update/`
+                : '/monitoring/api/alert-rule/create/';
+
+            try {
+                const resp = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCsrfToken()
+                    },
+                    body: JSON.stringify(payload)
+                });
+                if (resp.ok) {
+                    location.reload();
+                } else {
+                    const err = await resp.json();
+                    showAlert('Ошибка: ' + (err.error || 'Не удалось сохранить'), 'danger');
+                }
+            } catch(e) {
+                console.error(e);
+                showAlert('Ошибка при сохранении', 'danger');
+            }
+        });
+    }
+
+    document.querySelectorAll('.edit-rule-btn').forEach(btn => {
+        btn.addEventListener('click', async function() {
+            const ruleId = this.dataset.ruleId;
+            try {
+                const resp = await fetch(`/monitoring/api/alert-rule/${ruleId}/`);
+                if (!resp.ok) throw new Error('Ошибка загрузки');
+                const rule = await resp.json();
+                openRuleModal(rule.rule_type, rule.id);
+            } catch(e) {
+                console.error(e);
+                showAlert('Ошибка загрузки правила', 'danger');
+            }
+        });
+    });
+
+    document.querySelectorAll('.toggle-rule-btn').forEach(btn => {
+        btn.addEventListener('click', async function() {
+            const ruleId = this.dataset.ruleId;
+            const action = this.dataset.action;
+            try {
+                const resp = await fetch(`/monitoring/api/alert-rule/${ruleId}/toggle/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCsrfToken()
+                    },
+                    body: JSON.stringify({ is_active: action === 'activate' })
+                });
+                if (resp.ok) location.reload();
+            } catch(e) { console.error(e); }
+        });
+    });
+
+    document.querySelectorAll('.delete-rule-btn').forEach(btn => {
+        btn.addEventListener('click', async function() {
+            const ruleId = this.dataset.ruleId;
+            const ruleName = this.dataset.ruleName;
+            if (!confirm(`Удалить правило "${ruleName}"?`)) return;
+            try {
+                const resp = await fetch(`/monitoring/api/alert-rule/${ruleId}/delete/`, {
+                    method: 'DELETE',
+                    headers: { 'X-CSRFToken': getCsrfToken() }
+                });
+                if (resp.ok) location.reload();
+            } catch(e) { console.error(e); }
+        });
+    });
+
+});
+</script>
+<style>
+.condition-row, .action-row {
+    background: #1f1f24;
+    padding: 10px;
+    border-radius: 6px;
+    margin-bottom: 5px;
+}
+.condition-row select,
+.condition-row input,
+.action-row select,
+.action-row input {
+    font-size: 0.85rem;
+}
+.form-select option {
+    background-color: #1f1f24;
+    color: #e5e7eb;
+}
+</style>
+{% endblock %}

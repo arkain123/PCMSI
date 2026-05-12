@@ -1,0 +1,535 @@
+{% extends 'monitoring/base.html' %}
+{% load static %}
+
+{% block title %}Агенты — источники данных{% endblock %}
+
+{% block extra_head %}
+<style>
+    /* Чёткие подсказки в полях ввода */
+    .form-control::placeholder {
+        color: #8b8b93 !important;
+        opacity: 1 !important;
+    }
+    .form-control:focus::placeholder {
+        color: #a1a1aa !important;
+    }
+    /* Подсказки под полями — чуть ярче */
+    small.text-muted {
+        color: #a1a1aa !important;
+    }
+    /* Улучшение отображения значений в информации об агенте */
+    .agent-info-value code {
+        word-break: break-word;
+        overflow-wrap: anywhere;
+        white-space: normal;
+    }
+    .agent-info-value {
+        word-break: break-word;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="fas fa-database me-2"></i> Агенты (источники данных)</h1>
+    <button class="btn btn-primary-custom" data-bs-toggle="modal" data-bs-target="#addAgentModal">
+        <i class="fas fa-plus"></i> Добавить агента
+    </button>
+</div>
+
+<div class="card-dashboard">
+    <div class="card-header">
+        <span class="card-title">Список агентов</span>
+        <span class="text-muted">Всего: {{ agents|length }}</span>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-dark-custom mb-0">
+                <thead>
+                    <tr>
+                        <th>Название</th>
+                        <th>IP адрес</th>
+                        <th>Статус</th>
+                        <th>Последняя активность</th>
+                        <th>Создан</th>
+                        <th>Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for agent in agents %}
+                    <tr>
+                        <td>
+                            <strong>{{ agent.name }}</strong>
+                            <br><small class="text-muted">ID: {{ agent.id|truncatechars:8 }}</small>
+                        </td>
+                        <td>{{ agent.ip_address }}</td>
+                        <td>
+                            {% if agent.is_active %}
+                                {% if agent.last_seen %}
+                                    {% if agent.is_online %}
+                                        <span class="badge bg-success">Онлайн</span>
+                                    {% else %}
+                                        <span class="badge bg-warning">Оффлайн</span>
+                                    {% endif %}
+                                {% else %}
+                                    <span class="badge bg-secondary">Не подключался</span>
+                                {% endif %}
+                            {% else %}
+                                <span class="badge bg-danger">Отключен</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if agent.last_seen %}
+                                {{ agent.last_seen|date:"d.m.Y H:i:s" }}
+                            {% else %}
+                                <span class="text-muted">Никогда</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ agent.created_at|date:"d.m.Y" }}</td>
+                        <td class="action-buttons">
+                            <button class="btn btn-sm btn-outline-info view-agent-btn"
+                                    data-agent-id="{{ agent.id }}"
+                                    title="Просмотр">
+                                <i class="fas fa-eye"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-warning edit-agent-btn"
+                                    data-agent-id="{{ agent.id }}"
+                                    data-agent-name="{{ agent.name }}"
+                                    data-agent-ip="{{ agent.ip_address }}"
+                                    title="Редактировать">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            {% if agent.is_active %}
+                            <button class="btn btn-sm btn-outline-secondary toggle-agent-btn"
+                                    data-agent-id="{{ agent.id }}"
+                                    data-action="deactivate"
+                                    title="Отключить">
+                                <i class="fas fa-pause"></i>
+                            </button>
+                            {% else %}
+                            <button class="btn btn-sm btn-outline-success toggle-agent-btn"
+                                    data-agent-id="{{ agent.id }}"
+                                    data-action="activate"
+                                    title="Включить">
+                                <i class="fas fa-play"></i>
+                            </button>
+                            {% endif %}
+                            <button class="btn btn-sm btn-outline-danger delete-agent-btn"
+                                    data-agent-id="{{ agent.id }}"
+                                    data-agent-name="{{ agent.name }}"
+                                    title="Удалить">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="6" class="text-center py-4">
+                            <i class="fas fa-database fa-2x mb-3 text-muted"></i>
+                            <p class="text-muted">Нет зарегистрированных агентов</p>
+                            <button class="btn btn-primary-custom" data-bs-toggle="modal" data-bs-target="#addAgentModal">
+                                <i class="fas fa-plus"></i> Добавить первого агента
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="addAgentModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-user-plus me-2"></i>Добавить агента
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="addAgentForm">
+                    <div class="mb-3">
+                        <label class="form-label">Название агента *</label>
+                        <input type="text" class="form-control" id="addAgentName" required
+                               placeholder="Например: Production Server 1">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">IP адрес *</label>
+                        <input type="text" class="form-control" id="addAgentIP" required
+                               placeholder="Например: 192.168.1.100">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Secret Key (опционально)</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="addAgentKey"
+                                   placeholder="Авто-генерация если пусто">
+                            <button class="btn btn-outline-secondary" type="button" id="generateKeyBtn">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                        </div>
+                        <small class="text-muted">Если оставить пустым, ключ будет сгенерирован автоматически</small>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-primary-custom" id="saveAgentBtn">
+                    <i class="fas fa-save"></i> Сохранить
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="editAgentModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-edit me-2"></i>Редактировать агента
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editAgentForm">
+                    <input type="hidden" id="editAgentId">
+                    <div class="mb-3">
+                        <label class="form-label">Название агента *</label>
+                        <input type="text" class="form-control" id="editAgentName" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">IP адрес *</label>
+                        <input type="text" class="form-control" id="editAgentIP" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Новый Secret Key (оставьте пустым чтобы не менять)</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="editAgentKey"
+                                   placeholder="Оставьте пустым для сохранения текущего">
+                            <button class="btn btn-outline-secondary" type="button" id="generateEditKeyBtn">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-primary-custom" id="updateAgentBtn">
+                    <i class="fas fa-save"></i> Обновить
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="viewAgentModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-eye me-2"></i>Информация об агенте
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="viewAgentContent">
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="deleteConfirmModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-exclamation-triangle text-danger me-2"></i>Подтверждение удаления
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Вы уверены, что хотите удалить агента <strong id="deleteAgentName"></strong>?</p>
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-circle"></i>
+                    <strong>Внимание!</strong> Все метрики этого агента будут удалены без возможности восстановления!
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-danger" id="confirmDeleteBtn">
+                    <i class="fas fa-trash"></i> Удалить
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function getCsrfToken() {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, 10) === 'csrftoken=') {
+                cookieValue = decodeURIComponent(cookie.substring(10));
+                break;
+            }
+        }
+    }
+    return cookieValue;
+}
+
+function generateUUID() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
+}
+
+document.getElementById('generateKeyBtn').addEventListener('click', function() {
+    document.getElementById('addAgentKey').value = generateUUID();
+});
+
+document.getElementById('generateEditKeyBtn').addEventListener('click', function() {
+    document.getElementById('editAgentKey').value = generateUUID();
+});
+
+document.getElementById('saveAgentBtn').addEventListener('click', async function() {
+    const name = document.getElementById('addAgentName').value.trim();
+    const ip = document.getElementById('addAgentIP').value.trim();
+    const key = document.getElementById('addAgentKey').value.trim();
+
+    if (!name || !ip) {
+        alert('Заполните обязательные поля: название и IP адрес');
+        return;
+    }
+
+    try {
+        const response = await fetch('/monitoring/api/agent/create/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCsrfToken()
+            },
+            body: JSON.stringify({
+                name: name,
+                ip_address: ip,
+                secret_key: key || null
+            })
+        });
+
+        if (response.ok) {
+            location.reload();
+        } else {
+            const data = await response.json();
+            alert('Ошибка: ' + (data.error || 'Не удалось создать агента'));
+        }
+    } catch (error) {
+        console.error('Error creating agent:', error);
+        alert('Ошибка при создании агента');
+    }
+});
+
+document.querySelectorAll('.edit-agent-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        const agentId = this.dataset.agentId;
+        const agentName = this.dataset.agentName;
+        const agentIP = this.dataset.agentIp;
+
+        document.getElementById('editAgentId').value = agentId;
+        document.getElementById('editAgentName').value = agentName;
+        document.getElementById('editAgentIP').value = agentIP;
+        document.getElementById('editAgentKey').value = '';
+
+        new bootstrap.Modal(document.getElementById('editAgentModal')).show();
+    });
+});
+
+document.getElementById('updateAgentBtn').addEventListener('click', async function() {
+    const agentId = document.getElementById('editAgentId').value;
+    const name = document.getElementById('editAgentName').value.trim();
+    const ip = document.getElementById('editAgentIP').value.trim();
+    const key = document.getElementById('editAgentKey').value.trim();
+
+    if (!name || !ip) {
+        alert('Заполните обязательные поля');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/monitoring/api/agent/${agentId}/update/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCsrfToken()
+            },
+            body: JSON.stringify({
+                name: name,
+                ip_address: ip,
+                secret_key: key || null,
+                is_active: true
+            })
+        });
+
+        if (response.ok) {
+            location.reload();
+        } else {
+            const data = await response.json();
+            alert('Ошибка: ' + (data.error || 'Не удалось обновить агента'));
+        }
+    } catch (error) {
+        console.error('Error updating agent:', error);
+        alert('Ошибка при обновлении агента');
+    }
+});
+
+document.querySelectorAll('.toggle-agent-btn').forEach(btn => {
+    btn.addEventListener('click', async function() {
+        const agentId = this.dataset.agentId;
+        const action = this.dataset.action;
+        const isActive = action === 'activate';
+
+        try {
+            const response = await fetch(`/monitoring/api/agent/${agentId}/toggle/`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCsrfToken()
+                },
+                body: JSON.stringify({
+                    is_active: isActive
+                })
+            });
+
+            if (response.ok) {
+                location.reload();
+            } else {
+                const data = await response.json();
+                alert('Ошибка: ' + (data.error || 'Не удалось изменить статус агента'));
+            }
+        } catch (error) {
+            console.error('Error toggling agent:', error);
+            alert('Ошибка при изменении статуса агента');
+        }
+    });
+});
+
+document.querySelectorAll('.view-agent-btn').forEach(btn => {
+    btn.addEventListener('click', async function() {
+        const agentId = this.dataset.agentId;
+
+        try {
+            const response = await fetch(`/monitoring/api/agent/${agentId}/info/`);
+            const agent = await response.json();
+
+            const content = document.getElementById('viewAgentContent');
+            content.innerHTML = `
+                <div class="agent-info-item">
+                    <label class="agent-info-label">ID:</label>
+                    <span class="agent-info-value"><code>${agent.id}</code></span>
+                </div>
+                <div class="agent-info-item">
+                    <label class="agent-info-label">Название:</label>
+                    <span class="agent-info-value"><strong>${agent.name}</strong></span>
+                </div>
+                <div class="agent-info-item">
+                    <label class="agent-info-label">IP адрес:</label>
+                    <span class="agent-info-value">${agent.ip_address}</span>
+                </div>
+                <div class="agent-info-item">
+                    <label class="agent-info-label">Secret Key:</label>
+                    <span class="agent-info-value"><code>${agent.secret_key}</code></span>
+                </div>
+                <div class="agent-info-item">
+                    <label class="agent-info-label">Статус:</label>
+                    <span class="agent-info-value">${agent.is_active ? '<span class="badge bg-success">Активен</span>' : '<span class="badge bg-danger">Отключен</span>'}</span>
+                </div>
+                <div class="agent-info-item">
+                    <label class="agent-info-label">Последняя активность:</label>
+                    <span class="agent-info-value">${agent.last_seen ? new Date(agent.last_seen).toLocaleString('ru-RU') : '<span class="text-muted">Никогда</span>'}</span>
+                </div>
+                <div class="agent-info-item">
+                    <label class="agent-info-label">Создан:</label>
+                    <span class="agent-info-value">${new Date(agent.created_at).toLocaleString('ru-RU')}</span>
+                </div>
+                <hr>
+                <div class="agent-info-item">
+                    <label class="agent-info-label">Количество метрик:</label>
+                    <span class="agent-info-value"><strong>${agent.metrics_count || 0}</strong></span>
+                </div>
+            `;
+
+            new bootstrap.Modal(document.getElementById('viewAgentModal')).show();
+        } catch (error) {
+            console.error('Error viewing agent:', error);
+            alert('Ошибка при загрузке информации об агенте');
+        }
+    });
+});
+
+let agentToDelete = null;
+
+document.querySelectorAll('.delete-agent-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        agentToDelete = {
+            id: this.dataset.agentId,
+            name: this.dataset.agentName
+        };
+        document.getElementById('deleteAgentName').textContent = agentToDelete.name;
+        new bootstrap.Modal(document.getElementById('deleteConfirmModal')).show();
+    });
+});
+
+document.getElementById('confirmDeleteBtn').addEventListener('click', async function() {
+    if (!agentToDelete) return;
+
+    try {
+        const response = await fetch(`/monitoring/api/agent/${agentToDelete.id}/delete/`, {
+            method: 'DELETE',
+            headers: {
+                'X-CSRFToken': getCsrfToken()
+            }
+        });
+
+        if (response.ok) {
+            location.reload();
+        } else {
+            const data = await response.json();
+            alert('Ошибка: ' + (data.error || 'Не удалось удалить агента'));
+        }
+    } catch (error) {
+        console.error('Error deleting agent:', error);
+        alert('Ошибка при удалении агента');
+    }
+});
+</script>
+
+<style>
+.action-buttons .btn {
+    padding: 4px 8px;
+    margin: 2px;
+}
+
+.action-buttons .btn i {
+    font-size: 0.9rem;
+}
+
+.badge {
+    font-size: 0.85rem;
+    padding: 5px 10px;
+}
+
+.table td {
+    vertical-align: middle;
+}
+</style>
+{% endblock %}
