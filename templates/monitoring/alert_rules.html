@@ -3,6 +3,21 @@
 
 {% block title %}Алерты — правила{% endblock %}
 
+{% block extra_head %}
+<style>
+        .form-control::placeholder {
+                color: #8b8b93 !important;
+                opacity: 1 !important;
+        }
+        .form-control:focus::placeholder {
+                color: #a1a1aa !important;
+        }
+        small.text-muted {
+                color: #a1a1aa !important;
+        }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1><i class="fas fa-exclamation-triangle me-2"></i> Правила алертов</h1>
@@ -306,6 +321,39 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         } catch(e) { console.error(e); }
         return {};
+    }
+
+    const ruleTargetSelect = document.getElementById('ruleTarget');
+    if (ruleTargetSelect) {
+        ruleTargetSelect.addEventListener('change', async function() {
+            if (currentRuleType !== 'metric') return;
+            const agentId = this.value;
+            if (!agentId) return;
+            await updateAllMetricSelects(agentId);
+        });
+    }
+
+    async function updateAllMetricSelects(agentId) {
+        if (!agentId) return;
+        let metrics = [];
+        try {
+            const resp = await fetch(`/monitoring/api/agent/${agentId}/metrics-alerts/`);
+            if (resp.ok) {
+                metrics = await resp.json();
+            }
+        } catch(e) { console.error(e); return; }
+
+        document.querySelectorAll('.condition-metric').forEach(select => {
+            const currentValue = select.value;
+            select.innerHTML = '<option value="">Выберите метрику</option>';
+            metrics.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m;
+                opt.textContent = m;
+                if (m === currentValue) opt.selected = true;
+                select.appendChild(opt);
+            });
+        });
     }
 
     async function createConditionRow(conditionData = null) {
