@@ -71,7 +71,15 @@ Use them to quickly understand what a specific change does.
 2) In agent/config.yaml , specify the key, ID, and master address
 3) Run it using `python agent.py`
 
-### Links
+## Preview enviroment
+
+URL for preview project: https://pcmsi.mare.by/monitoring
+
+Username: test
+
+Password: 12345678
+
+## Links
 
 * [GitHub](https://github.com/arkain123/PCMSI)
 * [Wiki](https://arkain123.github.io/PCMSI/)
@@ -145,7 +153,15 @@ ____
 2) В agent/config.yaml укажите ключ, ID и адрес мастер
 3) Запустите используя `python agent.py`
 
-### Ссылки
+## Тестовое окружение
+
+Ссылка на тестовый preview проект: https://pcmsi.mare.by/monitoring
+
+Логин: test
+
+Пароль: 12345678
+
+## Ссылки
 
 * [GitHub](https://github.com/arkain123/PCMSI)
 * [Документация](https://arkain123.github.io/PCMSI/)
