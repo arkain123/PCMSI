@@ -1,6 +1,5 @@
 from django.contrib import admin
 from django.urls import path, include, re_path
-from . import views
 from django.conf import settings
 from django.views.static import serve
 
