@@ -19,7 +19,6 @@ Main features:
 
 #### Developed by [Borodkin Dmitry](https://github.com/arkain123)
 
-![GitHub License](https://img.shields.io/github/license/arkain123/PCMSI)
 ![Last Commit](https://img.shields.io/github/last-commit/arkain123/PCMSI)
 ![Downloads](https://img.shields.io/github/downloads/arkain123/PCMSI/total)
 ![Code Size](https://img.shields.io/github/languages/code-size/arkain123/PCMSI)
@@ -95,7 +94,6 @@ ____
 
 #### Разработано [Бородкиным Дмитрием](https://github.com/arkain123)
 
-![GitHub License](https://img.shields.io/github/license/arkain123/PCMSI)
 ![Last Commit](https://img.shields.io/github/last-commit/arkain123/PCMSI)
 ![Downloads](https://img.shields.io/github/downloads/arkain123/PCMSI/total)
 ![Code Size](https://img.shields.io/github/languages/code-size/arkain123/PCMSI)
