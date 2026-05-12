@@ -58,10 +58,9 @@ After=network.target
 
 [Service]
 User=$USER
-Group=www-data
 WorkingDirectory=$(pwd)
-ExecStart=$(pwd)/venv/bin/gunicorn --workers 3 --bind 0.0.0.0:8000 pcmsi.wsgi:application
-Restart=always
+ExecStart=$(pwd)/venv/bin/gunicorn --workers 3 --bind 0.0.0.0:8999 --error-logfile $(pwd)/logs/gunicorn-error.log --access-logfile $(pwd)/logs/gunicorn-access.log PCMSI.wsgi:application
+Restart=on-failure
 
 [Install]
 WantedBy=multi-user.target
